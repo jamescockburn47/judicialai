@@ -1,0 +1,26 @@
+# Environment / secrets
+.env
+
+# Rust build artifacts
+backend/target/
+frontend/src-tauri/target/
+
+# Node modules
+frontend/node_modules/
+
+# Vite build output
+frontend/dist/
+
+# Tauri temp scripts
+*.tmp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.cursor/
+*.ps1~ 
+
+# Local matter data (user documents — not committed)
+# Demo matter source files ARE committed (they are bundled resources)

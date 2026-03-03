@@ -1,0 +1,32 @@
+[package]
+name = "bs-detector"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+default-run = "bs-detector"
+
+[[bin]]
+name = "bs-detector"
+path = "src/main.rs"
+
+[[bin]]
+name = "evals"
+path = "src/evals.rs"
+
+[dependencies]
+axum = { version = "0.8", features = ["multipart"] }
+tokio = { version = "1", features = ["full"] }
+tower-http = { version = "0.6", features = ["cors", "fs"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
+regex = "1"
+urlencoding = "2"
+url = "2"
+uuid = { version = "1", features = ["v4"] }
+anyhow = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+dotenvy = "0.15"
+scraper = "0.25"
+html2text = "0.16"

@@ -1,0 +1,27 @@
+{
+  "identifier": "default",
+  "description": "Default permissions for Judicial Review",
+  "local": true,
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "shell:allow-spawn",
+    "shell:allow-execute",
+    "fs:allow-read-text-file",
+    "fs:allow-write-text-file",
+    "fs:allow-mkdir",
+    "fs:allow-read-dir",
+    "fs:allow-exists",
+    "fs:allow-copy-file",
+    "fs:scope-document-recursive",
+    "fs:scope-appdata-recursive",
+    "store:allow-load",
+    "store:allow-set",
+    "store:allow-get",
+    "store:allow-delete",
+    "store:allow-save",
+    "opener:allow-open-url",
+    "dialog:allow-open",
+    "dialog:allow-save"
+  ]
+}

@@ -1,0 +1,160 @@
+# BS Detector — Full Brief for Gemini
+
+## Context
+
+**The Company**
+Learned Hand AI is a seed-stage US judicial AI startup (~10 people) with a Michigan Supreme Court contract. They build bench-side tools for judges — fact extraction, motion analysis, citation verification, draft order generation. Juan Vazquez Torres is Head Engineer and set this test.
+
+**The Role**
+Domain Expert / Legal Engineer hybrid. The person taking this test (James) is a senior UK litigator at Harcus Parker specialising in civil fraud and competition law, with extensive AI tooling experience including building Collate (see below) and CaseKit.
+
+**The Test**
+6-hour take-home coding challenge. Repo: github.com/JuanVazTor/lh-ai-fs. The scaffold is minimal — FastAPI + React, two commits, `llm.py` wrapping GPT-4o (already deprecated), `main.py` with a single `POST /analyze` endpoint containing one comment: `# TODO: Build your multi-agent pipeline here`. Four plain `.txt` documents in `backend/documents/`: a Motion for Summary Judgment, police report, medical records excerpt, witness statement.
+
+**Evaluation criteria per the brief:** agent decomposition, prompt quality, eval design, how far through spec, honesty of reflection, NOT lines of code.
+
+---
+
+## The Test Documents
+
+**Case:** Rivera v. Harmon Construction Group, Inc., BC-2023-04851, Superior Court of California, County of Los Angeles. Personal injury — scaffolding collapse at a construction site, March 14 2021. Defendant's MSJ filed August 28 2023.
+
+**MSJ Analysis — BS Instances Identified (pre-build)**
+
+The MSJ contains four material problems already identified by reading:
+
+1. **Kellerman v. Pacific Coast Construction, Inc., 887 F.2d 1204, 1209 (9th Cir. 1991)** — High probability fabricated. Proposition: OSHA compliance creates a rebuttable presumption of reasonable care in negligence. This holding is unverifiable, the case name is generic, and the quoted language is suspiciously clean. Primary ground truth BS instance.
+
+2. **Seabright Insurance Co. v. US Airways, 52 Cal.4th 590, 598 (2011)** — Real case, misused. The MSJ uses it for the proposition that statutory compliance is highly probative of due care. Seabright actually concerns the Privette doctrine and delegation of safety duties to independent contractors. Doctrinal misuse, not fabrication — the harder detection problem.
+
+3. **Privette v. Superior Court, 5 Cal.4th 689, 702 (1993)** — Real case, suspect quote. The MSJ quotes: "A hirer is never liable for injuries sustained by an independent contractor's employees when the injuries arise from the contracted work." The word "never" overstates the actual holding. Privette established a presumption of non-liability with recognised exceptions (Hooker v. Department of Transportation — retained control). Quote requires primary source verification.
+
+4. **Footnote 1** — Six string citations with no stated propositions, including two out-of-jurisdiction cases (Texas, Florida) cited without explanation in a California motion. Classic hallucination padding.
+
+**Key insight:** A single well-prompted Sonnet call identified all four issues in one pass. This shapes the architecture decision.
+
+---
+
+## Architecture Decision
+
+**Rejected:** The scaffold. GPT-4o is deprecated, the scaffold is two commits old, and rebuilding demonstrates more than extending a stub.
+
+**Rejected:** Multi-model council (Opus + GPT + DeepSeek). Adds complexity without improving detection accuracy for this problem class. Council adds audit value, not better answers. Honest reflection point.
+
+**Chosen:** Rust backend + React frontend. Reasons:
+- James has already built Collate (see below) in this exact stack
+- Rust compiles to a binary inside Docker — no change to docker-compose.yml externally
+- Signals genuine technical investment
+- CaseKit citation checker (James's existing tool) is portable with US source adaptation
+
+**LLM:** Anthropic only. `llm.py` rewritten to use the Anthropic SDK, `claude-opus-4-6` for reasoning tasks, `claude-haiku-4-5` for extraction. `OPENAI_API_KEY` replaced with `ANTHROPIC_API_KEY` in `.env`.
+
+---
+
+## Collate — Prior Art
+
+Collate (github.com/legalquant/Collate, collate.law) is a browser-based litigation tool James built for Legal Quants. Stack: Rust compiled to WASM + React + Zustand + TypeScript. 47 Rust tests, 66 frontend tests.
+
+Core interaction model: resolution checklist. A lawyer reviews every tracked change and comment across multiple reviewer versions of a document — accept, reject, or defer each item with notes. Every decision is the lawyer's. No automated merging. CSP-enforced client-side only, no network calls.
+
+This interaction model maps directly onto the judicial review workflow. The resolution checklist becomes the citation review interface. Accept/reject/defer with notes becomes the judge-in-the-loop mechanism.
+
+---
+
+## Full Architecture
+
+### Backend — Rust/Axum
+
+```
+backend/
+├── src/
+│   ├── main.rs          — Axum server, POST /analyze, POST /rerun
+│   ├── agents/
+│   │   ├── extractor.rs — Citation extraction (Haiku)
+│   │   ├── validator.rs — Citation validation + US source check (Opus)
+│   │   ├── consistency.rs — SUMF cross-reference against other docs (Opus)
+│   │   └── memo.rs      — Judicial summary paragraph (Opus)
+│   ├── graph.rs         — Argument dependency mapping (Opus)
+│   ├── llm.rs           — Anthropic API client
+│   └── types.rs         — Shared structs
+├── Dockerfile           — Multi-stage: rust:latest builder → minimal runtime
+└── Cargo.toml
+```
+
+**Pipeline (sequential):**
+
+1. Load all `.txt` documents from `documents/`
+2. **Extractor** — Haiku identifies every citation in the MSJ: citation string, proposition claimed, whether a direct quote is used, location in document
+3. **Validator** — Opus validates each citation: does this case likely exist, does it support the claimed proposition, is the quote accurate. US legal sources checked (CourtListener API, Google Scholar fallback). Returns verdict: `verified / suspect / fabricated / misused`, confidence, reasoning
+4. **Graph mapper** — Opus maps argument dependency: which citations are structural (argument fails without them) vs decorative. Returns DAG structure as JSON
+5. **Consistency checker** — Opus cross-references SUMF assertions against police report, medical records, witness statement. Flags unsupported assertions
+6. **Memo** — Opus generates one paragraph judicial summary: what the motion argues, evidentiary weaknesses, key legal question. Judicial register — neutral, precise, written for someone with 40 motions that week
+
+**Second endpoint `POST /rerun`:** Takes a citation ID plus the judge's note. Reruns validation for that citation only with the judge's concern prepended to the prompt. Returns updated verdict. This is the human-in-the-loop mechanism.
+
+### Frontend — React/TypeScript
+
+Adapted from Collate's interaction model:
+
+**Left panel:** Argument DAG (React Flow or D3). Nodes are main arguments and citations. Edges are dependency relationships. Colour: green (verified), amber (suspect), red (fabricated/misused), grey (unverifiable). Click a node to open detail panel.
+
+**Right panel:** Detail view for selected node. Shows citation, proposition, verdict, confidence, reasoning. Three buttons: Accept / Flag / Rerun. If Flag is selected, text input for judge's note appears, then Rerun fires `POST /rerun`. Response updates the node in place.
+
+**Top:** Judicial summary paragraph from memo agent. One paragraph, always visible.
+
+**Bottom:** Resolution checklist — Collate-style. Every citation listed with current status. Accept all, flag all, export. Export generates JSON audit trail: every citation, every decision, every rerun with the judge's note and the AI response.
+
+**Session persistence:** Zustand store, localStorage, same pattern as Collate. Judge can close browser and resume.
+
+### Eval Harness
+
+`evals/run_evals.rs` or `evals.py` (Python acceptable here for speed):
+
+Three ground truth cases:
+- Kellerman → expected: `fabricated`, confidence: `high`
+- Seabright → expected: `misused`, confidence: `high`  
+- Privette quote → expected: `suspect`, confidence: `medium`
+
+Metrics: precision, recall, hallucination rate. Run with single command. Output to stdout.
+
+---
+
+## What This Is Really Demonstrating
+
+**Technical:** Rust backend with Anthropic integration, interactive DAG, human-in-the-loop rerun mechanism, eval harness. Clean Docker build.
+
+**Domain:** Identified all material BS instances before writing a line of code. Understood that Seabright misuse and Kellerman fabrication are different problem types requiring different detection approaches. Designed around actual judicial workflow constraints rather than engineering impressiveness.
+
+**Product:** The interaction model survives judicial ethics scrutiny because the judge makes every decision. The audit trail is appellate-useful. The rerun mechanism means the tool responds to judicial expertise rather than replacing it.
+
+---
+
+## Reflection Points (pre-written)
+
+1. Single Sonnet call caught everything. Multi-agent adds structure and auditability, not detection accuracy. In production you'd triage citation type before allocating compute — existence checking needs retrieval breadth, doctrinal misuse needs reasoning depth.
+
+2. The scaffold was already outdated on delivery (GPT-4o deprecated). Rebuilt in Rust using existing tooling from Collate and CaseKit — documented decision, not oversight.
+
+3. Kellerman and Seabright are different failure modes. Fabrication is detectable by retrieval. Misuse requires the model to know what the case actually holds and compare it to the claimed proposition. Production system needs to route these differently.
+
+4. Predictive scoring (probability of success) explicitly excluded. Wrong for a judicial tool institutionally and ethically. The tool helps the judge see clearly, not decide for them.
+
+5. US source coverage is patchy for state trial court decisions. Flagged in output where retrieval fails rather than papering over it.
+
+---
+
+## Time Plan
+
+**Before clock starts:** Read all four documents. Build ground truth JSON. Set up Anthropic API key. Confirm Docker boots.
+
+**Hour 1:** Axum skeleton, `/analyze` endpoint, document loading, Anthropic client, Haiku extraction working.
+
+**Hour 2:** Opus validation with US source checks. Verdict schema locked. Graph mapping prompt.
+
+**Hour 3:** Consistency checker. Memo agent. Both endpoints working end to end.
+
+**Hour 4:** React frontend. DAG rendering. Detail panel. Rerun flow.
+
+**Hour 5:** Resolution checklist. Export. Session persistence. Eval harness.
+
+**Hour 6:** README and reflection. Polish. Docker confirmed clean build.

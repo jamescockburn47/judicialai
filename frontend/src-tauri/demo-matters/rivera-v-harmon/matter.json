@@ -1,0 +1,15 @@
+{
+  "id": "rivera-v-harmon",
+  "name": "Rivera v. Harmon Construction Group",
+  "caseNumber": "BC-2023-04851",
+  "court": "Superior Court of California, County of Los Angeles",
+  "description": "Personal injury action arising from scaffolding collapse at 2200 West Olympic Boulevard, March 12, 2021. Defendant's Motion for Summary Judgment filed August 28, 2023.",
+  "createdAt": "2023-08-28",
+  "isDemo": true,
+  "primaryDocument": "motion_for_summary_judgment.txt",
+  "supportingDocuments": [
+    "police_report.txt",
+    "medical_records_excerpt.txt",
+    "witness_statement.txt"
+  ]
+}
