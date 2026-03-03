@@ -98,10 +98,11 @@ const PATTERNS: &[CitationPattern] = &[
     },
 ];
 
-// Regex to extract a case name from a lookback window before the citation.
-// Stops at sentence boundaries (periods followed by space+capital, or "See also").
-// Pattern: "CaseName v. OtherParty, <volume>"
-const CASE_NAME_RE: &str = r"([A-Z][A-Za-z0-9][A-Za-z0-9\s\,&']*?(?:v\.|vs\.)\s+[A-Za-z][A-Za-z0-9][A-Za-z0-9\s\.\,&']*?),\s*\d";
+// Regex to extract a case name from a lookback window.
+// Requires both parties to be reasonable length (no sentence-spanning).
+// Pre-v. party: starts capital, max ~50 chars, ends before "v."
+// Post-v. party: starts capital, max ~50 chars, ends before volume digit
+const CASE_NAME_RE: &str = r"([A-Z][A-Za-z0-9][A-Za-z0-9 ,\.&']{1,50}?(?:v\.|vs\.) [A-Za-z][A-Za-z0-9][A-Za-z0-9 ,\.&']{1,50}?),\s*\d";
 
 pub fn extract_citations(text: &str, source_doc: &str) -> Vec<ExtractedCitation> {
     let mut citations: Vec<ExtractedCitation> = Vec::new();
@@ -117,9 +118,6 @@ pub fn extract_citations(text: &str, source_doc: &str) -> Vec<ExtractedCitation>
             let full_match = cap.get(0).map(|m| m.as_str()).unwrap_or("");
             let match_start = cap.get(0).map(|m| m.start()).unwrap_or(0);
 
-            // Look back up to 200 chars, trim at last newline to avoid cross-line capture
-            let lookback_start = match_start.saturating_sub(200);
-            let raw_lookback = &text[lookback_start..match_start];
             // Look back up to 200 chars, prefer trimming at newline to avoid cross-line capture.
             // If trimmed window has no "v.", fall back to full raw lookback (handles cases
             // where citation is at the end of a long sentence).
@@ -247,12 +245,17 @@ mod tests {
 
     #[test]
     fn extracts_cal4th_citation() {
-        let text = "Seabright Insurance Co. v. US Airways, Inc., 52 Cal.4th 590, 598 (2011)";
+        // Test with preceding sentence — matches actual MSJ context for Seabright
+        let text = "compliance with statutory safety requirements is highly probative of the exercise of due care. Seabright Insurance Co. v. US Airways, Inc., 52 Cal.4th 590, 598 (2011).";
         let results = extract_citations(text, "msj");
-        assert!(!results.is_empty());
+        assert!(!results.is_empty(), "should extract Seabright from mid-sentence context");
         let c = &results[0];
         assert_eq!(c.reporter, "Cal.4th");
         assert_eq!(c.year.as_deref(), Some("2011"));
+        assert!(
+            c.case_name.as_deref().unwrap_or("").contains("Seabright"),
+            "case_name should contain Seabright, got: {:?}", c.case_name
+        );
     }
 
     #[test]
