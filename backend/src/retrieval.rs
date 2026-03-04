@@ -107,19 +107,34 @@ async fn fetch_full_text(
 
         if resp.status().is_success() {
             if let Ok(json) = resp.json::<serde_json::Value>().await {
+                // Try plain_text first, then html_with_citations (most reliable), then xml_harvard
                 let text = json["plain_text"].as_str().filter(|s| s.trim().len() > 200)
-                    .map(|s| s.trim()[..s.trim().len().min(12000)].to_string());
+                    .map(|s| s.trim()[..s.trim().len().min(12000)].to_string())
+                    .or_else(|| {
+                        // html_with_citations is typically the largest and most complete field
+                        json["html_with_citations"].as_str()
+                            .filter(|s| s.trim().len() > 200)
+                            .and_then(|h| html2text::from_read(h.as_bytes(), 100).ok())
+                            .filter(|s| s.trim().len() > 200)
+                            .map(|s| {
+                                let t = s.trim();
+                                t[..t.len().min(12000)].to_string()
+                            })
+                    })
+                    .or_else(|| {
+                        // xml_harvard as final fallback
+                        json["xml_harvard"].as_str()
+                            .filter(|s| s.trim().len() > 200)
+                            .and_then(|h| html2text::from_read(h.as_bytes(), 100).ok())
+                            .filter(|s| s.trim().len() > 200)
+                            .map(|s| {
+                                let t = s.trim();
+                                t[..t.len().min(12000)].to_string()
+                            })
+                    });
+
                 if text.is_some() {
                     return text;
-                }
-                // Fall back to html_with_citations if plain_text empty
-                let html_text = json["html_with_citations"].as_str()
-                    .filter(|s| s.trim().len() > 200)
-                    .and_then(|h| html2text::from_read(h.as_bytes(), 100).ok())
-                    .filter(|s| s.trim().len() > 200)
-                    .map(|s| s.trim()[..s.trim().len().min(12000)].to_string());
-                if html_text.is_some() {
-                    return html_text;
                 }
             }
         }
