@@ -38,8 +38,14 @@ pub struct RetrievedCase {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum RetrievalStatus {
+    /// Case found and text retrieved
     Resolved,
-    Unresolvable,
+    /// Searched but not found in any indexed database — potential fabrication signal
+    NotFound,
+    /// Case exists in a jurisdiction/database not indexed (e.g. Cal.App.4th in CourtListener)
+    /// Not a fabrication signal — just outside current coverage
+    NotIndexed,
+    /// Technical retrieval error
     Error(String),
 }
 

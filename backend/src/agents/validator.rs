@@ -58,8 +58,21 @@ pub async fn validate_citation(
         .unwrap_or("[Case text not retrieved]");
 
     let retrieval_info = approved.retrieved_case.as_ref().map(|r| {
+        let status_note = match &r.status {
+            crate::types::RetrievalStatus::Resolved => "Found and retrieved".to_string(),
+            crate::types::RetrievalStatus::NotFound => format!(
+                "NOT FOUND in CourtListener (cite_count={}). This is a potential fabrication signal — a real case used in a brief almost always appears somewhere in citation databases.",
+                r.cite_count.unwrap_or(0)
+            ),
+            crate::types::RetrievalStatus::NotIndexed => format!(
+                "Not indexed in CourtListener (reporter: {} — state court decisions in this reporter series are not in CourtListener's free index). This is NOT a fabrication signal. Assess plausibility from the citation details, year, court, and whether the proposition is consistent with the jurisdiction's law.",
+                r.citation_id // will be replaced with reporter below
+            ),
+            crate::types::RetrievalStatus::Error(e) => format!("Retrieval error: {}", e),
+        };
         format!(
-            "Source: {} | Title: {} | Court: {} | Date: {} | Cite count in CourtListener graph: {} | URL: {}",
+            "Status: {}\nSource: {} | Title: {} | Court: {} | Date: {} | Cite count in graph: {} | URL: {}",
+            status_note,
             r.source,
             r.title.as_deref().unwrap_or("(unknown)"),
             r.court_name.as_deref().unwrap_or("(unknown)"),

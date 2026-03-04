@@ -244,8 +244,9 @@ async fn search_by_case_name(
     let search: ClSearchResponse = resp.json().await.ok()?;
 
     if search.count == 0 || search.results.is_empty() {
-        // Case name searched but not found. Return a stub with cite_count=0
-        // so the validator knows this case doesn't appear to exist.
+        // Case name searched but not found in CourtListener.
+        // Return a stub with cite_count=0 — potential fabrication signal.
+        // (Note: if the reporter is not indexed, unresolvable() handles this instead)
         return Some(RetrievedCase {
             citation_id: citation.id.clone(),
             url: String::new(),
@@ -257,7 +258,7 @@ async fn search_by_case_name(
             full_text: None,
             cite_count: Some(0),
             resolution_method: "courtlistener_case_name_not_found".to_string(),
-            status: RetrievalStatus::Unresolvable,
+            status: RetrievalStatus::NotFound,
         });
     }
 
@@ -414,6 +415,34 @@ pub async fn resolve_citation(citation: &ExtractedCitation) -> RetrievedCase {
 }
 
 fn unresolvable(citation: &ExtractedCitation, reason: &str) -> RetrievedCase {
+    // Distinguish between "not found" (possible fabrication) and "not indexed"
+    // (real court whose decisions aren't in CourtListener's free index)
+    let not_indexed_reporters = [
+        "Cal.App.4th", "Cal.App.5th", "Cal.App.3d",  // Cal. Court of Appeal
+        "Cal.Rptr.3d", "Cal.Rptr.2d",                 // Cal. unofficial reporters
+        "N.Y.S.3d", "N.Y.S.2d",                        // NY Sup/App Div
+        "A.3d", "A.2d",                                 // Atlantic Reporter (state courts)
+        "So.2d",                                        // Southern Reporter older
+        "S.E.2d", "S.E.3d",                            // South-Eastern Reporter
+        "N.W.2d", "N.W.3d",                            // North-Western Reporter
+        "P.3d", "P.2d",                                 // Pacific Reporter (state)
+        "S.W.2d",                                       // South-Western Reporter older
+    ];
+
+    let is_not_indexed = not_indexed_reporters.contains(&citation.reporter.as_str());
+
+    let status = if is_not_indexed {
+        RetrievalStatus::NotIndexed
+    } else {
+        RetrievalStatus::NotFound
+    };
+
+    let resolution_method = if is_not_indexed {
+        format!("not_indexed: {} decisions are not in CourtListener's free index ({})", citation.reporter, reason)
+    } else {
+        format!("not_found: {}", reason)
+    };
+
     RetrievedCase {
         citation_id: citation.id.clone(),
         url: String::new(),
@@ -424,8 +453,8 @@ fn unresolvable(citation: &ExtractedCitation, reason: &str) -> RetrievedCase {
         decision_date: None,
         full_text: None,
         cite_count: None,
-        resolution_method: format!("unresolvable: {}", reason),
-        status: RetrievalStatus::Unresolvable,
+        resolution_method,
+        status,
     }
 }
 

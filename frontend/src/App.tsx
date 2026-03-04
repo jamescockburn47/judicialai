@@ -235,16 +235,21 @@ function CaseTextPanel({
           </pre>
         ) : (
           <div className="text-sm text-slate-500 space-y-2">
-            <p className="font-medium text-amber-700">
-              {retrieved.status === 'unresolvable'
-                ? 'Case not found in CourtListener'
+            <p className={`font-medium ${retrieved.status === 'not_found' ? 'text-red-700' : retrieved.status === 'not_indexed' ? 'text-amber-700' : 'text-slate-600'}`}>
+              {retrieved.status === 'not_found'
+                ? 'Not found in CourtListener'
+                : retrieved.status === 'not_indexed'
+                ? 'Not indexed in CourtListener'
                 : 'Full text not available'}
             </p>
             <p className="text-xs leading-relaxed">
-              {retrieved.status === 'unresolvable'
-                ? `This citation was searched in CourtListener's database but returned no results. Citation count: ${retrieved.cite_count ?? 'unknown'}. This is a strong indicator of a fabricated or non-existent case.`
-                : 'The case was found but its full opinion text could not be retrieved. The AI validator assessed it based on available metadata and citation count.'}
+              {retrieved.status === 'not_found'
+                ? `Searched CourtListener but found no matching case. Citation count: ${retrieved.cite_count ?? 'unknown'}. A real case used in a brief almost always appears somewhere in citation databases — this is a strong fabrication signal.`
+                : retrieved.status === 'not_indexed'
+                ? `This reporter series is not indexed in CourtListener's free database. This does not indicate fabrication — many legitimate state appellate decisions are simply not available in free databases. The AI validator assessed plausibility from the citation details and legal context.`
+                : 'The case was found but full opinion text could not be retrieved.'}
             </p>
+            <p className="text-xs text-slate-400">{retrieved.resolution_method}</p>
           </div>
         )}
       </div>
@@ -276,15 +281,15 @@ function HelpPanel({ onClose }: { onClose: () => void }) {
           <section>
             <h3 className="font-semibold text-slate-900 mb-1.5 text-sm">The pipeline</h3>
             <ol className="space-y-2 list-decimal pl-4">
-              <li><span className="font-medium">Extract citations</span> — click the button on the MSJ. Runs a deterministic Rust parser (no API key needed). All 10 citations in the Rivera MSJ are identified.</li>
-              <li><span className="font-medium">Case retrieval</span> — each citation is looked up in CourtListener. Where found, the full PDF is downloaded and parsed. The citation count (how many other cases cite this one) is a key fabrication signal: 0 citations = likely fabricated.</li>
+              <li><span className="font-medium">Extract citations</span> — click the button on the primary document. Runs a deterministic Rust parser (no API key needed). Supports all major US reporter formats (Federal Reporter, Cal., N.Y., Tex., Fla., etc.).</li>
+              <li><span className="font-medium">Case retrieval</span> — each citation is searched in CourtListener. Where found, the full opinion text is retrieved. The citation count (how many other decisions cite this case) is a key fabrication signal: 0 citations in a well-indexed court = likely fabricated.</li>
               <li><span className="font-medium">Choose mode</span>
                 <ul className="mt-1 space-y-0.5 pl-3 list-disc text-slate-600">
                   <li><span className="font-medium">Auto</span> — pipeline runs end to end automatically</li>
-                  <li><span className="font-medium">Manual</span> — you approve each retrieved case before analysis runs</li>
+                  <li><span className="font-medium">Manual</span> — you review retrieved cases and approve before analysis runs</li>
                 </ul>
               </li>
-              <li><span className="font-medium">Analysis</span> — Claude Sonnet extracts what the brief claims each case holds. Claude Opus checks that claim against the retrieved case text. Inconsistencies in the SUMF are cross-referenced against the police report, medical records, and witness statement.</li>
+              <li><span className="font-medium">Analysis</span> — Claude Sonnet extracts what the brief claims each case holds. Claude Opus checks that claim against the retrieved case text and flags quote inaccuracies. Supporting documents are cross-referenced against the motion's statement of facts.</li>
               <li><span className="font-medium">Review results</span> — three tabs: Bench Memo, Citation Review, Argument Map.</li>
             </ol>
           </section>
@@ -292,36 +297,34 @@ function HelpPanel({ onClose }: { onClose: () => void }) {
           <section>
             <h3 className="font-semibold text-slate-900 mb-1.5 text-sm">Verdict types</h3>
             <dl className="space-y-1.5">
-              <div><dt className="inline font-medium text-red-700">Fabricated — </dt><dd className="inline text-slate-600">Case does not appear to exist. Citation count is 0, no text retrieved. Strong indicator of AI hallucination.</dd></div>
-              <div><dt className="inline font-medium text-orange-700">Misused — </dt><dd className="inline text-slate-600">Case is real but holds something materially different. The brief attributes the wrong doctrine to it.</dd></div>
-              <div><dt className="inline font-medium text-amber-700">Suspect — </dt><dd className="inline text-slate-600">Case may support the proposition but it is overstated, taken out of context, or a quote has been modified.</dd></div>
+              <div><dt className="inline font-medium text-red-700">Fabricated — </dt><dd className="inline text-slate-600">Case does not appear to exist in any indexed database. Citation count is 0 and no text retrieved. Strong indicator of AI hallucination in the brief.</dd></div>
+              <div><dt className="inline font-medium text-orange-700">Misused — </dt><dd className="inline text-slate-600">Case is real but holds something materially different from the attributed proposition. Doctrinal transplant.</dd></div>
+              <div><dt className="inline font-medium text-amber-700">Suspect — </dt><dd className="inline text-slate-600">Case may support the proposition but it is overstated, taken out of context, or a direct quote has been modified.</dd></div>
               <div><dt className="inline font-medium text-emerald-700">Verified — </dt><dd className="inline text-slate-600">Case found, supports the stated proposition, quote (if any) is accurate.</dd></div>
-              <div><dt className="inline font-medium text-slate-600">Unverifiable — </dt><dd className="inline text-slate-600">Citation count not retrieved and no text available. Cannot assess — but this is noted, not assumed clean.</dd></div>
+              <div><dt className="inline font-medium text-slate-600">Unverifiable — </dt><dd className="inline text-slate-600">Full text not retrieved and citation count unavailable. Cannot assess — noted, not assumed clean.</dd></div>
             </dl>
           </section>
 
           <section>
             <h3 className="font-semibold text-slate-900 mb-1.5 text-sm">Accept / Flag / Rerun</h3>
             <dl className="space-y-1.5">
-              <div><dt className="inline font-medium text-emerald-700">Accept — </dt><dd className="inline text-slate-600">You agree with the AI verdict on this citation. It is recorded in the audit trail.</dd></div>
-              <div><dt className="inline font-medium text-amber-700">Flag — </dt><dd className="inline text-slate-600">You disagree or want to note a concern. Add a note in the text field and click Flag. Also recorded in the audit trail.</dd></div>
-              <div><dt className="inline font-medium text-indigo-700">Rerun — </dt><dd className="inline text-slate-600">Add a specific note (e.g. "check the Hooker exception to Privette") and click Rerun. The validator re-runs with your note prepended to the prompt. The AI will address your concern directly.</dd></div>
+              <div><dt className="inline font-medium text-emerald-700">Accept — </dt><dd className="inline text-slate-600">You agree with the AI verdict on this citation. Recorded in the audit trail.</dd></div>
+              <div><dt className="inline font-medium text-amber-700">Flag — </dt><dd className="inline text-slate-600">You disagree or want to note a concern. Add a note and click Flag. Recorded in the audit trail.</dd></div>
+              <div><dt className="inline font-medium text-indigo-700">Rerun — </dt><dd className="inline text-slate-600">Add a specific instruction (e.g. "check whether this court recognised exceptions to the general rule") and click Rerun. The validator reruns with your note prepended. Use this to direct the AI to examine a specific concern.</dd></div>
             </dl>
           </section>
 
           <section>
             <h3 className="font-semibold text-slate-900 mb-1.5 text-sm">Viewing retrieved cases</h3>
             <p className="leading-relaxed text-slate-600">
-              In Citation Review, each citation row has a <span className="font-medium">View case text</span> button.
-              Click it to replace the MSJ panel with the retrieved opinion text — you can read the actual case
-              alongside the AI's analysis to verify it yourself.
-              Click <span className="font-medium">← MSJ</span> to return to the brief.
+              In Citation Review, click the ⬚ icon on any row to load the retrieved opinion into the centre panel.
+              The primary document remains visible on the left — you can compare the brief against the actual case text directly.
             </p>
             <p className="mt-1 leading-relaxed text-slate-600">
-              <span className="font-medium">Full opinion text (PDF)</span> means the full PDF was downloaded from
-              CourtListener. <span className="font-medium">Snippet only</span> means only a short extract was
-              available. <span className="font-medium">Case not found</span> means the citation was searched and
-              returned no results — the strongest fabrication signal.
+              <span className="font-medium">Not indexed in CourtListener</span> — this is not a fabrication signal.
+              Many legitimate state intermediate appellate decisions (e.g. Cal.App.4th, N.Y.A.D.) are not in CourtListener's free index.
+              The AI assesses plausibility from citation details and legal context.
+              <span className="font-medium ml-1">Not found</span> — searched and absent — is a fabrication signal.
             </p>
           </section>
 
@@ -329,7 +332,7 @@ function HelpPanel({ onClose }: { onClose: () => void }) {
             <h3 className="font-semibold text-slate-900 mb-1.5 text-sm">Export Audit Trail</h3>
             <p className="leading-relaxed text-slate-600">
               The Export button produces a JSON file containing every citation, every AI verdict, every human decision,
-              and every rerun with its note. This is the appellate-usable record of the review.
+              and every rerun with its note. Suitable for appellate record purposes.
               The bench memo can be exported separately as a .txt file from the Bench Memo tab.
             </p>
           </section>
@@ -337,10 +340,10 @@ function HelpPanel({ onClose }: { onClose: () => void }) {
           <section>
             <h3 className="font-semibold text-slate-900 mb-1.5 text-sm">Limitations</h3>
             <ul className="space-y-1 list-disc pl-4 text-slate-600">
-              <li>California Court of Appeal decisions (Cal.App.4th) are not indexed in CourtListener — these return as unverifiable.</li>
-              <li>Unpublished decisions will also be unverifiable — this does not mean they are fabricated.</li>
+              <li>State intermediate appellate decisions (Cal.App.4th, N.Y.S., etc.) are not indexed in CourtListener — these return as "not indexed", not fabricated.</li>
+              <li>Unpublished decisions and very old cases may also be absent — absence is not evidence of fabrication.</li>
               <li>AI semantic analysis can miss nuance. The Rerun mechanism is specifically designed for you to direct the AI to examine specific concerns.</li>
-              <li>This tool is for citation verification only. It does not provide legal advice.</li>
+              <li>This tool assists citation verification. It does not constitute legal advice and does not replace independent legal judgment.</li>
             </ul>
           </section>
 

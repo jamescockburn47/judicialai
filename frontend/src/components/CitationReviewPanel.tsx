@@ -112,7 +112,7 @@ function CaseTextView({
 
       {/* Case text */}
       <div className="flex-1 overflow-y-auto p-4">
-        {!retrieved || retrieved.status === 'unresolvable' ? (
+        {!retrieved || retrieved.status === 'unresolvable' || retrieved.status === 'not_found' || retrieved.status === 'not_indexed' ? (
           <div className="flex flex-col gap-2 text-slate-500 text-sm">
             <p className="font-medium text-amber-700">Case not found in public databases</p>
             <p className="text-xs text-slate-500 leading-relaxed">
@@ -178,7 +178,7 @@ export function CitationReviewPanel({
   }
 
   const resolved = retrievedCases.filter((r) => r.status === 'resolved').length;
-  const unresolvable = retrievedCases.filter((r) => r.status === 'unresolvable').length;
+  const unresolvable = retrievedCases.filter((r) => r.status === 'unresolvable' || r.status === 'not_found' || r.status === 'not_indexed').length;
 
   return (
     <div className="flex flex-col h-full">
@@ -190,7 +190,7 @@ export function CitationReviewPanel({
               {citations.length} citations extracted
             </p>
             <p className="text-xs text-slate-500 mt-0.5">
-              {resolved} retrieved · {unresolvable} unresolvable
+              {resolved} retrieved · {unresolvable} not found/not indexed
               {mode === 'manual' && approvedCount > 0 && ` · ${approvedCount} approved`}
             </p>
           </div>
@@ -222,7 +222,7 @@ export function CitationReviewPanel({
         {citations.map((c) => {
           const retrieved = getRetrieved(c.id);
           const approved = isApproved(c.id);
-          const unresolvable = !retrieved || retrieved.status === 'unresolvable';
+          const unresolvable = !retrieved || retrieved.status === 'unresolvable' || retrieved.status === 'not_found' || retrieved.status === 'not_indexed';
 
           return (
             <div
@@ -248,7 +248,7 @@ export function CitationReviewPanel({
                       }`}
                     >
                       {unresolvable
-                        ? 'Not found in databases'
+                        ? (retrieved?.status === 'not_indexed' ? 'Not indexed (not a fabrication signal)' : 'Not found in databases')
                         : `${Math.round((retrieved?.confidence ?? 0) * 100)}% match`}
                     </span>
                     {/* Cite count — key fabrication signal */}

@@ -8,21 +8,20 @@ use uuid::Uuid;
 use crate::llm::{LlmClient, MODEL_OPUS};
 use crate::types::{ConsistencyFlag, ConsistencyStatus};
 
-const SYSTEM: &str = r#"You are a meticulous judicial law clerk. Your task is to identify where the Motion for Summary Judgment makes factual assertions that are directly contradicted by the record documents.
+const SYSTEM: &str = r#"You are a meticulous judicial law clerk. Your task is to identify where a motion's factual assertions are directly contradicted by the record documents submitted alongside it.
 
-IMPORTANT: Only flag CONTRADICTIONS — where a document in the record says something materially different from what the MSJ asserts. Do NOT flag:
+IMPORTANT: Only flag CONTRADICTIONS — where a record document says something materially different from what the motion asserts. Do NOT flag:
 - Facts that are merely "unsupported" (absence of evidence is not a contradiction)
 - Neutral facts that the record neither confirms nor contradicts
 - Procedural facts (filing dates, case numbers)
+- Differences in tone or characterisation that do not contradict substance
 
-For each SUMF assertion you review:
-1. Check the police report, medical records, and witness statement for direct contradiction
+For each factual assertion in the motion's statement of facts:
+1. Check all record documents for direct contradiction
 2. Only create a flag if a document says something INCONSISTENT with the assertion — not just silent on it
-3. The strongest contradictions: (a) incident date discrepancy (MSJ says March 14, records say March 12), (b) PPE status (MSJ §4 says no PPE; police report and witness statement both confirm plaintiff was wearing a harness), (c) Harmon's foreman directing work on the defective scaffolding section
+3. Quote the specific contradicting passage
 
-Be specific: quote both the MSJ assertion and the contradicting passage. If a document supports the assertion, note that too but do NOT flag it as a problem.
-
-Return ONLY valid JSON — a minimal array of genuine contradictions."#;
+Return ONLY valid JSON."#;
 
 #[derive(Debug, Deserialize)]
 struct ConsistencyOutput {
@@ -41,41 +40,52 @@ pub async fn check_consistency(
     witness_statement: &str,
 ) -> Result<Vec<ConsistencyFlag>> {
     let user = format!(
-        r#"Here is the Motion for Summary Judgment (focus on the Statement of Undisputed Material Facts):
+        r#"Here is the primary motion document (focus on the Statement of Undisputed Material Facts or equivalent factual section):
 
-<MSJ>
+<MOTION>
 {}
-</MSJ>
+</MOTION>
 
-Here are the record documents:
+Here are the record documents submitted alongside the motion:
 
-<POLICE_REPORT>
+<DOCUMENT_1>
 {}
-</POLICE_REPORT>
+</DOCUMENT_1>
 
-<MEDICAL_RECORDS>
+<DOCUMENT_2>
 {}
-</MEDICAL_RECORDS>
+</DOCUMENT_2>
 
-<WITNESS_STATEMENT>
+<DOCUMENT_3>
 {}
-</WITNESS_STATEMENT>
+</DOCUMENT_3>
 
-Identify ONLY direct contradictions between the SUMF and the record. Known contradictions to verify:
-1. SUMF §3 states the incident occurred "on or about March 14, 2021" — the police report and medical records both give March 12, 2021
-2. SUMF §4 states Rivera was "not wearing required personal protective equipment" — the police report (Ellison statement) and witness statement (Tran) both state he WAS wearing a harness
-3. The MSJ does not mention that Harmon's foreman Ray Donner directed the crew to work on the defective section — the police report and witness statement both record this
+Identify ONLY direct contradictions between the factual assertions in the motion and what the record documents actually say.
 
-Return a JSON array of ONLY genuine contradictions (not unsupported facts):
+A contradiction means a record document states something materially different from what the motion asserts — not merely that the record is silent on a fact.
+
+Examples of genuine contradictions:
+- Motion says X happened on date A; a record document gives date B
+- Motion says a party was not wearing safety equipment; a witness statement or incident report says they were
+- Motion omits a material fact that is directly recorded in a contemporaneous document and that affects the legal argument
+
+Do not flag:
+- Facts the record does not address (absence ≠ contradiction)
+- Procedural or docket facts
+- Differences in emphasis or characterisation that do not contradict the substance
+
+Return a JSON array of ONLY genuine contradictions:
 [
   {{
-    "sumf_assertion": "<the exact SUMF text>",
+    "sumf_assertion": "<exact text of the motion's assertion>",
     "supported_by": [],
-    "contradicted_by": ["police_report", "witness_statement"],
+    "contradicted_by": ["document_1", "document_2"],
     "status": "contradicted",
-    "detail": "<quote the specific contradicting passage>"
+    "detail": "<quote the specific contradicting passage from the record document>"
   }}
-]"#,
+]
+
+If there are no genuine contradictions, return an empty array []."#,
         msj_text, police_report, medical_records, witness_statement
     );
 
