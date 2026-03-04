@@ -82,6 +82,25 @@ if (-not $npmCmd -and $nodeCmd) {
 "@
 }
 
+# Git
+$gitCmd = Get-Command git -ErrorAction SilentlyContinue
+if ($gitCmd) {
+    $gitVer = (git --version 2>&1).Trim()
+    Write-Host "  Git: $gitVer" -ForegroundColor Green
+} else {
+    $errors += @"
+  GIT NOT FOUND
+  Git is required to clone this repository.
+
+  Install it from: https://git-scm.com/download/win
+  Run the installer (default options are fine), then restart this terminal.
+  After installing, run:
+    git clone https://github.com/jamescockburn47/judicialai.git
+    cd judicialai
+    .\launch.bat
+"@
+}
+
 # WebView2 (required for Tauri on Windows — usually pre-installed on Win10/11)
 $webview2Key = "HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
 $webview2User = "HKCU:\SOFTWARE\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"

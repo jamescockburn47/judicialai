@@ -103,14 +103,20 @@ This is not the most efficient architecture for automated processing at scale. I
 ## Quick start
 
 ### Prerequisites
-- Rust (https://rustup.rs)
-- Node.js v18+
-- Anthropic API key (https://console.anthropic.com)
 
-### Launch
+Install these in order before cloning:
+
+1. **Git** — https://git-scm.com/download/win (choose default options)
+2. **Rust** — https://rustup.rs (run the installer, restart your terminal after)
+3. **Node.js v18+** — https://nodejs.org (choose the LTS version)
+
+An **Anthropic API key** is needed for AI validation only. Citation extraction and case retrieval from CourtListener work without one. Get a key at https://console.anthropic.com if you want to run the full analysis pipeline.
+
+### Clone and launch
 
 ```bash
-# Add your ANTHROPIC_API_KEY to .env (CourtListener token already included)
+git clone https://github.com/jamescockburn47/judicialai.git
+cd judicialai
 .\launch.bat
 ```
 
