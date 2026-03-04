@@ -1,5 +1,5 @@
-# Judicial Review Launcher
-# Checks prerequisites, kills old instances, then starts backend and Tauri app.
+# Judicial Review Launcher - pure ASCII, no here-strings
+# Works on all Windows machines regardless of regional settings
 
 $Root = Split-Path -Parent $MyInvocation.MyCommand.Definition
 $BackendDir = Join-Path $Root "backend"
@@ -9,8 +9,8 @@ $CargoExe = "$env:USERPROFILE\.cargo\bin\cargo.exe"
 
 # --- Prerequisites check ---
 
-$errors = @()
-$warnings = @()
+$prereqErrors = @()
+$prereqWarnings = @()
 
 Write-Host ""
 Write-Host "Checking prerequisites..." -ForegroundColor Cyan
@@ -20,46 +20,44 @@ $cargoFound = $false
 if (Test-Path $CargoExe) {
     $cargoFound = $true
 } else {
-    $cargoInPath = Get-Command cargo -ErrorAction SilentlyContinue
-    if ($cargoInPath) {
-        $CargoExe = $cargoInPath.Source
+    $cargoCmd = Get-Command cargo -ErrorAction SilentlyContinue
+    if ($cargoCmd) {
+        $CargoExe = $cargoCmd.Source
         $cargoFound = $true
     }
 }
 
 if ($cargoFound) {
-    try {
-        $rustcBin = "$env:USERPROFILE\.cargo\bin\rustc.exe"
-        if (Test-Path $rustcBin) {
-            $rustcVer = (& $rustcBin --version 2>&1).Trim()
-        } else {
-            $rustcVer = (rustc --version 2>&1).Trim()
-        }
-        Write-Host "  Rust: $rustcVer" -ForegroundColor Green
-    } catch {
-        Write-Host "  Rust: installed" -ForegroundColor Green
+    $rustcBin = "$env:USERPROFILE\.cargo\bin\rustc.exe"
+    if (Test-Path $rustcBin) {
+        $rv = (& $rustcBin --version 2>&1)
+    } else {
+        $rv = (rustc --version 2>&1)
     }
+    Write-Host "  Rust: $rv" -ForegroundColor Green
 } else {
-    $errors += "RUST NOT FOUND`n  Install from: https://rustup.rs`n  Run the installer, then restart this terminal and try again."
+    $prereqErrors += "RUST NOT FOUND"
+    $prereqErrors += "  Install from: https://rustup.rs"
+    $prereqErrors += "  Run rustup-init.exe, then restart this terminal."
 }
 
-# Visual Studio Build Tools (needed by Rust on Windows to link binaries)
-# Check for cl.exe (MSVC compiler) or at least the VS install directory
+# Visual Studio Build Tools (needed by Rust on Windows)
 $vsWhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
 $hasMSVC = $false
 if (Test-Path $vsWhere) {
-    $vsInstalls = & $vsWhere -products * -requires Microsoft.VisualCpp.Tools.HostX64.TargetX64 -format json 2>&1
-    if ($vsInstalls -and $vsInstalls -ne "[]") { $hasMSVC = $true }
+    $vsOut = (& $vsWhere -products * -requires Microsoft.VisualCpp.Tools.HostX64.TargetX64 2>&1)
+    if ($vsOut -and ("$vsOut" -ne "")) { $hasMSVC = $true }
 }
 if (-not $hasMSVC) {
-    # Also check if cl.exe is on PATH
     if (Get-Command cl -ErrorAction SilentlyContinue) { $hasMSVC = $true }
 }
 if ($hasMSVC) {
     Write-Host "  Visual Studio Build Tools: found" -ForegroundColor Green
 } elseif ($cargoFound) {
-    # Rust is installed but MSVC may be missing — warn, Rust will error at build time
-    $warnings += "VISUAL STUDIO BUILD TOOLS may be missing.`n  Rust on Windows needs the C++ build tools to compile binaries.`n  If the build fails, install from:`n  https://visualstudio.microsoft.com/visual-cpp-build-tools/`n  Select 'Desktop development with C++' and click Install."
+    $prereqWarnings += "Visual Studio Build Tools may be missing."
+    $prereqWarnings += "  If the build fails, install from:"
+    $prereqWarnings += "  https://visualstudio.microsoft.com/visual-cpp-build-tools/"
+    $prereqWarnings += "  Select Desktop development with C++ and click Install."
 }
 
 # Node.js
@@ -71,49 +69,47 @@ if ($nodeCmd) {
     if ($nodeMajor -ge 18) {
         Write-Host "  Node.js: $nodeVer" -ForegroundColor Green
     } else {
-        $errors += "NODE.JS TOO OLD: $nodeVer (need v18+)`n  Download LTS from: https://nodejs.org`n  Install, then restart this terminal."
+        $prereqErrors += "NODE.JS TOO OLD: $nodeVer (need v18+)"
+        $prereqErrors += "  Download LTS from: https://nodejs.org"
+        $prereqErrors += "  Install, then restart this terminal."
     }
 } else {
-    $errors += "NODE.JS NOT FOUND`n  Download LTS from: https://nodejs.org`n  Install, then restart this terminal."
+    $prereqErrors += "NODE.JS NOT FOUND"
+    $prereqErrors += "  Download LTS from: https://nodejs.org"
+    $prereqErrors += "  Install, then restart this terminal."
 }
 
 # Git
-$gitCmd = Get-Command git -ErrorAction SilentlyContinue
-if ($gitCmd) {
+if (Get-Command git -ErrorAction SilentlyContinue) {
     $gitVer = (git --version 2>&1).Trim()
     Write-Host "  Git: $gitVer" -ForegroundColor Green
 } else {
-    $errors += "GIT NOT FOUND`n  Install from: https://git-scm.com/download/win`n  Use default options, then restart this terminal."
+    $prereqErrors += "GIT NOT FOUND"
+    $prereqErrors += "  Install from: https://git-scm.com/download/win"
+    $prereqErrors += "  Use default options, then restart this terminal."
 }
 
-# npm
-if (-not (Get-Command npm -ErrorAction SilentlyContinue) -and $nodeCmd) {
-    $errors += "NPM NOT FOUND`n  npm should come with Node.js. Try reinstalling from https://nodejs.org"
-}
-
-# WebView2 (Tauri requirement on Windows, usually pre-installed on Win10/11)
+# WebView2
 $wv2a = "HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
 $wv2b = "HKCU:\SOFTWARE\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
 if ((Test-Path $wv2a) -or (Test-Path $wv2b)) {
     Write-Host "  WebView2: installed" -ForegroundColor Green
 } else {
-    $warnings += "WebView2 not detected. If the app fails to open, install it from:`n  https://developer.microsoft.com/microsoft-edge/webview2/"
+    $prereqWarnings += "WebView2 not detected. If the app fails to open:"
+    $prereqWarnings += "  https://developer.microsoft.com/microsoft-edge/webview2/"
 }
 
-# Print warnings (non-fatal)
-foreach ($w in $warnings) {
+# Print warnings
+if ($prereqWarnings.Count -gt 0) {
     Write-Host ""
-    Write-Host "WARNING: $w" -ForegroundColor Yellow
+    foreach ($w in $prereqWarnings) { Write-Host "WARNING: $w" -ForegroundColor Yellow }
 }
 
-# Print errors and stop if any are fatal
-if ($errors.Count -gt 0) {
+# Stop on errors
+if ($prereqErrors.Count -gt 0) {
     Write-Host ""
     Write-Host "Cannot launch - missing requirements:" -ForegroundColor Red
-    foreach ($e in $errors) {
-        Write-Host ""
-        Write-Host "  $e" -ForegroundColor Red
-    }
+    foreach ($e in $prereqErrors) { Write-Host $e -ForegroundColor Red }
     Write-Host ""
     Write-Host "Fix the issues above and run launch.bat again." -ForegroundColor Red
     Write-Host ""
@@ -124,7 +120,7 @@ if ($errors.Count -gt 0) {
 Write-Host "All prerequisites met." -ForegroundColor Green
 Write-Host ""
 
-# --- Kill old processes on ports 8002 and 5175 ---
+# --- Kill old processes ---
 
 Write-Host "Clearing ports 8002 and 5175..."
 foreach ($port in @(8002, 5175)) {
@@ -142,11 +138,11 @@ Start-Sleep -Milliseconds 600
 # --- .env setup ---
 
 if (-not (Test-Path $EnvFile)) {
-    $example = Join-Path $Root ".env.example"
-    if (Test-Path $example) {
-        Copy-Item $example $EnvFile
+    $exampleFile = Join-Path $Root ".env.example"
+    if (Test-Path $exampleFile) {
+        Copy-Item $exampleFile $EnvFile
     } else {
-        Set-Content $EnvFile "ANTHROPIC_API_KEY=your_key_here`nRUST_LOG=bs_detector=info"
+        Set-Content -Path $EnvFile -Value "ANTHROPIC_API_KEY=your_key_here`nRUST_LOG=bs_detector=info" -Encoding ASCII
     }
     Write-Host ".env created."
 }
@@ -156,9 +152,9 @@ if ($envContent -match "your_key_here") {
     Write-Host ""
     Write-Host "NOTE: ANTHROPIC_API_KEY is not set in .env" -ForegroundColor Yellow
     Write-Host "  Citation extraction and case retrieval work without it." -ForegroundColor Yellow
-    Write-Host "  AI validation (Run Analysis) requires an Anthropic key." -ForegroundColor Yellow
+    Write-Host "  AI validation requires an Anthropic key." -ForegroundColor Yellow
     Write-Host "  Get one at: https://console.anthropic.com" -ForegroundColor Yellow
-    Write-Host "  Edit .env in this folder and add: ANTHROPIC_API_KEY=sk-ant-..." -ForegroundColor Yellow
+    Write-Host "  Edit .env and add: ANTHROPIC_API_KEY=sk-ant-..." -ForegroundColor Yellow
     Write-Host ""
 }
 
@@ -174,45 +170,50 @@ if (-not (Test-Path (Join-Path $demoDest "matter.json"))) {
     Write-Host "  Seeded Rivera v. Harmon to $demoDest"
 }
 
-# --- Read env vars for backend ---
+# --- Read env vars ---
 
-$envExports = ""
-foreach ($line in (Get-Content $EnvFile -ErrorAction SilentlyContinue)) {
+$envLines = Get-Content $EnvFile -ErrorAction SilentlyContinue
+$envExportLines = @()
+foreach ($line in $envLines) {
     if ($line -match "^([A-Za-z_][A-Za-z0-9_]*)=(.+)$") {
-        $envExports += "`$env:$($Matches[1]) = '$($Matches[2])'`n"
+        $envExportLines += [string]::Format('$env:{0} = ''{1}''', $Matches[1], $Matches[2])
     }
 }
 
-# --- Launch backend ---
+# --- Build and write backend script using Set-Content (no here-strings) ---
+
+$backendLines = @()
+$backendLines += $envExportLines
+$backendLines += [string]::Format('$env:PATH = ''{0}\.cargo\bin;'' + $env:PATH', $env:USERPROFILE)
+$backendLines += [string]::Format('Set-Location ''{0}''', $BackendDir)
+$backendLines += "Write-Host 'Starting backend API...'"
+$backendLines += [string]::Format('& ''{0}'' run --bin bs-detector', $CargoExe)
 
 $backendScript = Join-Path $env:TEMP "jr_backend.ps1"
-Set-Content $backendScript @"
-$envExports
-`$env:PATH = '$env:USERPROFILE\.cargo\bin;' + `$env:PATH
-Set-Location '$BackendDir'
-Write-Host 'Starting backend API...'
-& '$CargoExe' run --bin bs-detector
-"@
-Write-Host "Starting backend..."
-Start-Process powershell -ArgumentList "-NoExit -ExecutionPolicy Bypass -File `"$backendScript`"" -WindowStyle Normal
+Set-Content -Path $backendScript -Value $backendLines -Encoding ASCII
 
-# --- Launch Tauri app ---
+Write-Host "Starting backend..."
+Start-Process powershell -ArgumentList "-NoExit", "-ExecutionPolicy", "Bypass", "-File", $backendScript -WindowStyle Normal
+
+# --- Build and write Tauri script using Set-Content (no here-strings) ---
+
+$tauriLines = @()
+$tauriLines += [string]::Format('$env:PATH = ''{0}\.cargo\bin;'' + $env:PATH', $env:USERPROFILE)
+$tauriLines += '$env:PATH = $env:PATH'
+$tauriLines += [string]::Format('Set-Location ''{0}''', $FrontendDir)
+$tauriLines += "if (-not (Test-Path 'node_modules')) {"
+$tauriLines += "    Write-Host 'Installing npm packages (first run only)...'"
+$tauriLines += "    npm install"
+$tauriLines += "}"
+$tauriLines += '$env:VITE_API_URL = ''http://localhost:8002'''
+$tauriLines += "Write-Host 'Building Tauri app (first run ~5-10 min, then fast)...'"
+$tauriLines += "npx tauri dev"
 
 $tauriScript = Join-Path $env:TEMP "jr_tauri.ps1"
-Set-Content $tauriScript @"
-`$env:PATH = '$env:USERPROFILE\.cargo\bin;' + `$env:PATH
-[System.Environment]::SetEnvironmentVariable('PATH', `$env:PATH, 'Process')
-Set-Location '$FrontendDir'
-if (-not (Test-Path 'node_modules')) {
-    Write-Host 'Installing npm packages (first run only)...'
-    npm install
-}
-`$env:VITE_API_URL = 'http://localhost:8002'
-Write-Host 'Building Tauri app (first run ~3-5 min, then fast)...'
-npx tauri dev
-"@
+Set-Content -Path $tauriScript -Value $tauriLines -Encoding ASCII
+
 Write-Host "Starting Tauri desktop app..."
-Start-Process powershell -ArgumentList "-NoExit -ExecutionPolicy Bypass -File `"$tauriScript`"" -WindowStyle Normal
+Start-Process powershell -ArgumentList "-NoExit", "-ExecutionPolicy", "Bypass", "-File", $tauriScript -WindowStyle Normal
 
 Write-Host ""
 Write-Host "Both windows are compiling. The desktop app opens automatically when ready." -ForegroundColor Cyan
