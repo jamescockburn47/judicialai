@@ -235,21 +235,27 @@ function CaseTextPanel({
           </pre>
         ) : (
           <div className="text-sm text-slate-500 space-y-2">
-            <p className={`font-medium ${retrieved.status === 'not_found' ? 'text-red-700' : retrieved.status === 'not_indexed' ? 'text-amber-700' : 'text-slate-600'}`}>
+            <p className={`font-medium ${retrieved.status === 'not_found' ? 'text-red-700' : retrieved.status === 'not_indexed' ? 'text-slate-700' : 'text-slate-600'}`}>
               {retrieved.status === 'not_found'
                 ? 'Not found in CourtListener'
                 : retrieved.status === 'not_indexed'
-                ? 'Not indexed in CourtListener'
+                ? 'Not in CourtListener\'s free index'
                 : 'Full text not available'}
             </p>
             <p className="text-xs leading-relaxed">
               {retrieved.status === 'not_found'
-                ? `Searched CourtListener but found no matching case. Citation count: ${retrieved.cite_count ?? 'unknown'}. A real case used in a brief almost always appears somewhere in citation databases — this is a strong fabrication signal.`
+                ? `Searched CourtListener but found no matching case. Citation count: ${retrieved.cite_count ?? 'unknown'}. A real case used in a brief almost always appears in citation databases — this is a strong fabrication signal.`
                 : retrieved.status === 'not_indexed'
-                ? `This reporter series is not indexed in CourtListener's free database. This does not indicate fabrication — many legitimate state appellate decisions are simply not available in free databases. The AI validator assessed plausibility from the citation details and legal context.`
+                ? `California Court of Appeal decisions (${retrieved.resolution_method.includes('Cal.App') ? 'Cal.App.4th/5th' : 'this reporter series'}) are not in CourtListener's free database. This is not a fabrication signal — these are legitimate published decisions.`
                 : 'The case was found but full opinion text could not be retrieved.'}
             </p>
-            <p className="text-xs text-slate-400">{retrieved.resolution_method}</p>
+            {retrieved.status === 'not_indexed' && (
+              <div className="bg-blue-50 border border-blue-200 rounded p-2 text-xs text-blue-700">
+                <p className="font-medium mb-0.5">AI assessment method</p>
+                <p>The validator assessed this citation using Claude's training knowledge of California appellate decisions, rather than retrieved text. The verdict reflects the plausibility of the claimed proposition based on known case law.</p>
+              </div>
+            )}
+            <p className="text-[10px] text-slate-400 font-mono">{retrieved.resolution_method}</p>
           </div>
         )}
       </div>

@@ -18,17 +18,19 @@ You will be given:
 4. The cite_count: number of times this case appears in CourtListener's citation graph
 
 CRITICAL SIGNALS:
-- cite_count = 0 with no case text: very strong indicator of fabrication. A case used in a brief almost always appears somewhere in citation databases. No case text + zero citations = likely fabricated.
+- cite_count = 0 with no case text AND status = not_found: very strong indicator of fabrication. A case used in a brief almost always appears somewhere in citation databases. No case text + zero citations + not found = likely fabricated.
 - cite_count > 50: well-established case, existence verified
+- status = not_indexed: this case is in a reporter series (e.g. Cal.App.4th, N.Y.S.3d) that is NOT indexed in CourtListener's free database. This is NOT a fabrication signal — these are legitimate published decisions. Use your training knowledge of the case and jurisdiction to assess whether the proposition is plausible.
 - Case text retrieved: assess whether the proposition and any quote match the actual text
-- No case text retrieved but cite_count > 0: real but full text unavailable — assess plausibility of proposition based on court, year, and legal context
 
 Your verdicts:
 - VERIFIED: Case exists, supports the stated proposition, any quote is accurate
 - SUSPECT: Case exists but proposition overstated, taken out of context, or quote modified (e.g. "never" added to conditional holding)
 - MISUSED: Case is real but holds something materially different from the claimed proposition — doctrinal transplant
-- FABRICATED: Case does not appear to exist in any verified legal database (cite_count=0, no text, implausible details)
-- UNVERIFIABLE: Case text not retrieved and cite_count not available — cannot assess, but note what could not be verified
+- FABRICATED: Case does not appear to exist in any verified legal database (status=not_found, cite_count=0, no text, implausible details)
+- UNVERIFIABLE: Cannot assess from available information — be explicit about WHY and what additional verification would require
+
+For not_indexed cases: assess plausibility from (1) your training knowledge of the case if you recognise it, (2) whether the proposition is consistent with the jurisdiction's established law, (3) whether the citation details (year, court, reporter volume/page) are internally consistent. Do not default to UNVERIFIABLE simply because no text was retrieved — make an assessment and explain it.
 
 For quote accuracy: if quoted text is provided, search for it verbatim in the case text. Flag any word omissions, substitutions, or additions — including absolute words like "never" or "always" that overstate a conditional holding.
 

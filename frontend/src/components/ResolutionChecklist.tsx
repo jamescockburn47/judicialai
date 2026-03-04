@@ -61,16 +61,6 @@ function CitationRow({
       {isFabricated && <span className="text-red-600 font-bold shrink-0" title="0 citations in graph — fabrication signal">⚠</span>}
       {item.rerun_count > 0 && <span className="text-indigo-500 shrink-0">↻{item.rerun_count}</span>}
 
-      {/* View case text */}
-      <button
-        onClick={(e) => { e.stopPropagation(); onViewCaseText(); }}
-        className={`shrink-0 rounded px-1 py-0.5 ${hasText ? 'text-indigo-500 hover:bg-indigo-100' : 'text-slate-300'}`}
-        title={hasText ? 'View case text' : 'No case text available'}
-        disabled={!hasText}
-      >
-        ⬚
-      </button>
-
       {/* Accept / Flag icon buttons */}
       {item.status !== 'accepted' ? (
         <button
@@ -199,6 +189,16 @@ export function ResolutionChecklist({
     }
   };
 
+  // Auto-select and load case text when a citation row is clicked
+  const handleSelectCitation = (item: ChecklistItem, rc: RetrievedCase | undefined) => {
+    const isSelected = selectedCitationId === item.id;
+    onSelectCitation(isSelected ? null : item.id);
+    // Automatically load case text into centre panel if text is available
+    if (!isSelected && rc?.full_text && rc.full_text.length > 200) {
+      onViewCaseText(item.id);
+    }
+  };
+
   const handleRerun = async (item: ChecklistItem) => {
     const note = notes[item.id];
     if (!note?.trim()) return;
@@ -257,7 +257,7 @@ export function ResolutionChecklist({
                 validationResult={vr}
                 retrieved={rc}
                 isSelected={isSelected}
-                onSelect={() => onSelectCitation(isSelected ? null : item.id)}
+                onSelect={() => handleSelectCitation(item, rc)}
                 onViewCaseText={() => onViewCaseText(item.id)}
                 onAccept={() => handleAccept(item)}
                 onFlag={() => handleFlag(item)}
