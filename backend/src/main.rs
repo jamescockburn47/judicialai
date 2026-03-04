@@ -94,6 +94,7 @@ async fn main() -> Result<()> {
             "http://localhost:5175".parse::<axum::http::HeaderValue>().unwrap(),
             "http://localhost:1420".parse::<axum::http::HeaderValue>().unwrap(),
             "tauri://localhost".parse::<axum::http::HeaderValue>().unwrap(),
+            "https://tauri.localhost".parse::<axum::http::HeaderValue>().unwrap(),
         ])
         .allow_methods(Any)
         .allow_headers(Any);

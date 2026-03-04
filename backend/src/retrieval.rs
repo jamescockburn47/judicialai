@@ -28,12 +28,14 @@ const COURTLISTENER_OPINIONS: &str = "https://www.courtlistener.com/api/rest/v4/
 const COURTLISTENER_CITATION_LOOKUP: &str = "https://www.courtlistener.com/api/rest/v4/citation-lookup/";
 const CL_STORAGE_BASE: &str = "https://storage.courtlistener.com/";
 
-/// Read optional CourtListener API token from environment.
-/// Free registration at https://www.courtlistener.com/sign-in/
-/// Token from https://www.courtlistener.com/api/rest/v4/api-token-auth/
+/// Read CourtListener API token from environment, with the shared token as fallback.
+/// The shared token (free account) is baked in so the installed app works without .env.
+/// Override by setting COURTLISTENER_API_TOKEN in .env for high-volume use.
 fn cl_api_token() -> Option<String> {
-    std::env::var("COURTLISTENER_API_TOKEN").ok()
-        .filter(|t| !t.is_empty() && t != "your_courtlistener_token_here")
+    const BUNDLED_TOKEN: &str = "0fe05870bc7e6a0c9420e1a7b863a7a088d80993";
+    let from_env = std::env::var("COURTLISTENER_API_TOKEN").ok()
+        .filter(|t| !t.is_empty() && t != "your_courtlistener_token_here");
+    Some(from_env.unwrap_or_else(|| BUNDLED_TOKEN.to_string()))
 }
 
 fn build_client() -> Result<reqwest::Client> {

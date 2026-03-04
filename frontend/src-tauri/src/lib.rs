@@ -27,7 +27,9 @@ pub fn run() {
                 match shell.sidecar("bs-detector") {
                     Ok(sidecar) => {
                         let sidecar_with_env = sidecar
-                            .env("DOCUMENTS_PATH", &docs_path);
+                            .env("DOCUMENTS_PATH", &docs_path)
+                            .env("COURTLISTENER_API_TOKEN", "0fe05870bc7e6a0c9420e1a7b863a7a088d80993")
+                            .env("RUST_LOG", "bs_detector=info,tower_http=info");
                         if let Err(e) = sidecar_with_env.spawn() {
                             eprintln!("Warning: failed to spawn bs-detector sidecar: {}", e);
                         }
