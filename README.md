@@ -25,20 +25,20 @@ The brief asked for:
 
 | Requirement | Status |
 |---|---|
-| Extract all citations from the MSJ | ✓ All 10 extracted (4 body, 6 footnote) by deterministic Rust parser |
-| Assess whether cited authority supports the stated proposition | ✓ Claude Opus validates each citation against retrieved full text |
-| Flag direct quotes for accuracy | ✓ Quote accuracy checked verbatim against case text |
+| Extract all citations from the MSJ | ✓ All 10 extracted (4 body, 6 footnote) by deterministic Rust parser — no LLM |
+| Assess whether cited authority supports the stated proposition | ✓ Sonnet extracts what the motion claims each case holds; Opus checks that claim against the retrieved full opinion text |
+| Flag direct quotes for accuracy | ✓ Quoted text checked verbatim against retrieved case text — any word not in the source text is flagged |
 | Structured JSON output | ✓ Full `AnalysisReport` struct with typed verdict fields |
 | Eval harness (precision, recall, hallucination rate) | ✓ `cargo run --bin evals` — 3 ground truths, threshold-based reporting |
-| Cross-document consistency check | ✓ SUMF assertions cross-referenced against police report, medical records, witness statement |
-| Express uncertainty appropriately | ✓ `unverifiable` verdict with explicit explanation of what was and was not searched |
+| Cross-document consistency check | ✓ SUMF assertions cross-referenced against police report, medical records, witness statement; only genuine contradictions flagged |
+| Express uncertainty appropriately | ✓ `unverifiable` verdict with explicit statement of what was searched and what was not found |
 | Pass structured data between agents, not raw text | ✓ Typed Rust structs at every stage |
-| At least 4 well-defined agents with distinct roles | ✓ 5 agents: extractor (deterministic), propositions, validator, consistency, graph/memo |
-| Confidence scoring with reasoning | ✓ High/medium/low per verdict, multi-signal score on retrieval |
-| Judicial memo agent | ✓ Structured 5-section bench memo |
-| Agent orchestration with failure handling | ✓ Sequential pipeline, each stage returns errors rather than silently continuing |
-| UI displaying report in readable form | ✓ Tauri desktop app with 3-panel layout |
-| Reflection document | ✓ This document and REFLECTION.md |
+| At least 4 well-defined agents with distinct roles | ✓ 5 agents: extractor (deterministic Rust, no LLM), propositions (Sonnet), validator (Opus), consistency (Opus), graph + memo (Opus) |
+| Confidence scoring with reasoning | ✓ High/medium/low per verdict; multi-signal retrieval score (citation count + year match + text availability) |
+| Judicial memo agent | ✓ Structured 5-section bench memo: reliability assessment, citation integrity, factual contradictions, effect on arguments, key legal questions |
+| Agent orchestration with failure handling | ✓ Sequential pipeline; each stage returns typed errors, propagated to the UI |
+| UI displaying report in readable form | ✓ Tauri desktop app: 3-panel layout with MSJ, retrieved case text, and citation checklist side by side |
+| Reflection document | ✓ REFLECTION.md |
 
 ---
 
@@ -54,7 +54,7 @@ The brief asked for:
 
 ### Exceeds the brief
 
-**Three-strategy citation retrieval with authenticated full text.** The brief implied existence checking. This pipeline does three things: (1) CourtListener citation-lookup API by exact volume/reporter/page — works for all reporters including Cal.App.4th; (2) case name search; (3) quoted citation text search. With the CourtListener API token, full opinion text (up to 12,000 chars) is retrieved via `html_with_citations`. Privette returns 11,861 chars; Seabright 11,867 chars. The validator works from actual primary source text, not snippets.
+**Three-strategy citation retrieval with full opinion text.** The brief required checking whether citations support their claimed propositions. This pipeline retrieves the actual primary source text to make that check: (1) CourtListener citation-lookup API by exact volume/reporter/page; (2) case name search; (3) quoted citation text search. With the CourtListener API token, full opinion text (up to 12,000 chars) is retrieved via `html_with_citations`. Privette returns 11,861 chars; Seabright 11,867 chars. The validator works from actual primary source text, not summaries or training data.
 
 **Distinction between `not_found` and `resolved_no_text`.** The pipeline distinguishes cases that were actively searched and not found (fabrication signal, cite_count=0) from cases that were found but whose text couldn't be retrieved (existence confirmed, proposition unverifiable). This is a materially different epistemological position and the validator is told explicitly which it is facing.
 

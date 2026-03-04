@@ -1,4 +1,4 @@
-/// Proposition Extractor — Sonnet claude-sonnet-4-5
+/// Proposition Extractor — Sonnet
 /// For each approved citation, reads the MSJ and extracts the exact
 /// proposition the motion claims the case supports, plus any direct quote.
 use anyhow::Result;
