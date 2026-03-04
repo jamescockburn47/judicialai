@@ -3,7 +3,7 @@ import { useAppStore } from './store';
 import { listMatters, saveAnalysisCache, loadAnalysisCache, readDocument } from './matters';
 import { extractCitations, analyzeDocument, rerunCitation } from './api';
 import { getApiKey } from './keystore';
-import type { AnalyzeRequest, Matter } from './types';
+import type { AnalyzeRequest, Matter, RetrievedCase } from './types';
 import { MatterSidebar } from './components/MatterSidebar';
 import { CitationReviewPanel } from './components/CitationReviewPanel';
 import { ArgumentDAG } from './components/ArgumentDAG';
@@ -189,6 +189,173 @@ function MemoPanel({ memo, matterId }: { memo: string; matterId: string }) {
   );
 }
 
+// ── Case Text Panel ───────────────────────────────────────────────────────────
+
+function CaseTextPanel({
+  retrieved,
+  onBack,
+}: {
+  retrieved: RetrievedCase;
+  onBack: () => void;
+}) {
+  const hasFullText = retrieved.full_text && retrieved.full_text.length > 200;
+  const textSource = hasFullText
+    ? (retrieved.resolution_method?.includes('pdf') || retrieved.full_text!.length > 1000
+        ? 'Full opinion text (PDF)'
+        : 'Snippet only')
+    : null;
+
+  return (
+    <div className="flex flex-col h-full border-r border-slate-200 bg-white">
+      <div className="px-4 py-2.5 border-b border-slate-200 shrink-0 flex items-center justify-between gap-2">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <button onClick={onBack} className="text-xs text-slate-400 hover:text-slate-700">← MSJ</button>
+            <span className="text-slate-300">|</span>
+            <p className="text-xs font-semibold text-slate-800 truncate">
+              {retrieved.title ?? 'Retrieved case'}
+            </p>
+          </div>
+          <div className="flex items-center gap-2 mt-0.5 text-[10px] text-slate-500 flex-wrap">
+            {retrieved.court_name && <span>{retrieved.court_name}</span>}
+            {retrieved.decision_date && <span>· {retrieved.decision_date}</span>}
+            {retrieved.cite_count !== null && retrieved.cite_count !== undefined && (
+              <span className={retrieved.cite_count === 0 ? 'text-red-600 font-medium' : ''}>
+                · {retrieved.cite_count === 0 ? '⚠ 0 citations in graph' : `${retrieved.cite_count} citations`}
+              </span>
+            )}
+            {textSource && (
+              <span className="bg-slate-100 px-1.5 py-0.5 rounded">{textSource}</span>
+            )}
+            {retrieved.url && (
+              <a href={retrieved.url} target="_blank" rel="noopener noreferrer"
+                className="text-indigo-500 hover:underline">Open source ↗</a>
+            )}
+          </div>
+        </div>
+      </div>
+      <div className="flex-1 overflow-y-auto p-4">
+        {hasFullText ? (
+          <pre className="text-xs text-slate-700 leading-relaxed whitespace-pre-wrap font-mono">
+            {retrieved.full_text}
+          </pre>
+        ) : (
+          <div className="text-sm text-slate-500 space-y-2">
+            <p className="font-medium text-amber-700">
+              {retrieved.status === 'unresolvable'
+                ? 'Case not found in CourtListener'
+                : 'Full text not available'}
+            </p>
+            <p className="text-xs leading-relaxed">
+              {retrieved.status === 'unresolvable'
+                ? `This citation was searched in CourtListener's database but returned no results. Citation count: ${retrieved.cite_count ?? 'unknown'}. This is a strong indicator of a fabricated or non-existent case.`
+                : 'The case was found but its full opinion text could not be retrieved. The AI validator assessed it based on available metadata and citation count.'}
+            </p>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Help Panel ────────────────────────────────────────────────────────────────
+
+function HelpPanel({ onClose }: { onClose: () => void }) {
+  return (
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-end p-4">
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-md h-full max-h-[90vh] flex flex-col">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-slate-200 shrink-0">
+          <h2 className="text-sm font-semibold text-slate-900">How to use Judicial Review</h2>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-700 text-xl">×</button>
+        </div>
+        <div className="flex-1 overflow-y-auto px-5 py-4 text-xs text-slate-700 space-y-4">
+
+          <section>
+            <h3 className="font-semibold text-slate-900 mb-1 text-sm">What this tool does</h3>
+            <p className="leading-relaxed text-slate-600">
+              Judicial Review detects fabricated, misused, and inaccurate legal citations in court documents.
+              It extracts citations from a motion, retrieves the actual cases from CourtListener,
+              and uses Claude (Opus) to check whether each case actually supports the proposition claimed.
+            </p>
+          </section>
+
+          <section>
+            <h3 className="font-semibold text-slate-900 mb-1.5 text-sm">The pipeline</h3>
+            <ol className="space-y-2 list-decimal pl-4">
+              <li><span className="font-medium">Extract citations</span> — click the button on the MSJ. Runs a deterministic Rust parser (no API key needed). All 10 citations in the Rivera MSJ are identified.</li>
+              <li><span className="font-medium">Case retrieval</span> — each citation is looked up in CourtListener. Where found, the full PDF is downloaded and parsed. The citation count (how many other cases cite this one) is a key fabrication signal: 0 citations = likely fabricated.</li>
+              <li><span className="font-medium">Choose mode</span>
+                <ul className="mt-1 space-y-0.5 pl-3 list-disc text-slate-600">
+                  <li><span className="font-medium">Auto</span> — pipeline runs end to end automatically</li>
+                  <li><span className="font-medium">Manual</span> — you approve each retrieved case before analysis runs</li>
+                </ul>
+              </li>
+              <li><span className="font-medium">Analysis</span> — Claude Sonnet extracts what the brief claims each case holds. Claude Opus checks that claim against the retrieved case text. Inconsistencies in the SUMF are cross-referenced against the police report, medical records, and witness statement.</li>
+              <li><span className="font-medium">Review results</span> — three tabs: Bench Memo, Citation Review, Argument Map.</li>
+            </ol>
+          </section>
+
+          <section>
+            <h3 className="font-semibold text-slate-900 mb-1.5 text-sm">Verdict types</h3>
+            <dl className="space-y-1.5">
+              <div><dt className="inline font-medium text-red-700">Fabricated — </dt><dd className="inline text-slate-600">Case does not appear to exist. Citation count is 0, no text retrieved. Strong indicator of AI hallucination.</dd></div>
+              <div><dt className="inline font-medium text-orange-700">Misused — </dt><dd className="inline text-slate-600">Case is real but holds something materially different. The brief attributes the wrong doctrine to it.</dd></div>
+              <div><dt className="inline font-medium text-amber-700">Suspect — </dt><dd className="inline text-slate-600">Case may support the proposition but it is overstated, taken out of context, or a quote has been modified.</dd></div>
+              <div><dt className="inline font-medium text-emerald-700">Verified — </dt><dd className="inline text-slate-600">Case found, supports the stated proposition, quote (if any) is accurate.</dd></div>
+              <div><dt className="inline font-medium text-slate-600">Unverifiable — </dt><dd className="inline text-slate-600">Citation count not retrieved and no text available. Cannot assess — but this is noted, not assumed clean.</dd></div>
+            </dl>
+          </section>
+
+          <section>
+            <h3 className="font-semibold text-slate-900 mb-1.5 text-sm">Accept / Flag / Rerun</h3>
+            <dl className="space-y-1.5">
+              <div><dt className="inline font-medium text-emerald-700">Accept — </dt><dd className="inline text-slate-600">You agree with the AI verdict on this citation. It is recorded in the audit trail.</dd></div>
+              <div><dt className="inline font-medium text-amber-700">Flag — </dt><dd className="inline text-slate-600">You disagree or want to note a concern. Add a note in the text field and click Flag. Also recorded in the audit trail.</dd></div>
+              <div><dt className="inline font-medium text-indigo-700">Rerun — </dt><dd className="inline text-slate-600">Add a specific note (e.g. "check the Hooker exception to Privette") and click Rerun. The validator re-runs with your note prepended to the prompt. The AI will address your concern directly.</dd></div>
+            </dl>
+          </section>
+
+          <section>
+            <h3 className="font-semibold text-slate-900 mb-1.5 text-sm">Viewing retrieved cases</h3>
+            <p className="leading-relaxed text-slate-600">
+              In Citation Review, each citation row has a <span className="font-medium">View case text</span> button.
+              Click it to replace the MSJ panel with the retrieved opinion text — you can read the actual case
+              alongside the AI's analysis to verify it yourself.
+              Click <span className="font-medium">← MSJ</span> to return to the brief.
+            </p>
+            <p className="mt-1 leading-relaxed text-slate-600">
+              <span className="font-medium">Full opinion text (PDF)</span> means the full PDF was downloaded from
+              CourtListener. <span className="font-medium">Snippet only</span> means only a short extract was
+              available. <span className="font-medium">Case not found</span> means the citation was searched and
+              returned no results — the strongest fabrication signal.
+            </p>
+          </section>
+
+          <section>
+            <h3 className="font-semibold text-slate-900 mb-1.5 text-sm">Export Audit Trail</h3>
+            <p className="leading-relaxed text-slate-600">
+              The Export button produces a JSON file containing every citation, every AI verdict, every human decision,
+              and every rerun with its note. This is the appellate-usable record of the review.
+              The bench memo can be exported separately as a .txt file from the Bench Memo tab.
+            </p>
+          </section>
+
+          <section>
+            <h3 className="font-semibold text-slate-900 mb-1.5 text-sm">Limitations</h3>
+            <ul className="space-y-1 list-disc pl-4 text-slate-600">
+              <li>California Court of Appeal decisions (Cal.App.4th) are not indexed in CourtListener — these return as unverifiable.</li>
+              <li>Unpublished decisions will also be unverifiable — this does not mean they are fabricated.</li>
+              <li>AI semantic analysis can miss nuance. The Rerun mechanism is specifically designed for you to direct the AI to examine specific concerns.</li>
+              <li>This tool is for citation verification only. It does not provide legal advice.</li>
+            </ul>
+          </section>
+
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Main App ──────────────────────────────────────────────────────────────────
 
 export default function App() {
@@ -209,8 +376,11 @@ export default function App() {
   const [running, setRunning] = useState(false);
   const [showKeySettings, setShowKeySettings] = useState(false);
   const [hasApiKey, setHasApiKey] = useState(false);
+  const [showHelp, setShowHelp] = useState(false);
   const [activeDocFilename, setActiveDocFilename] = useState<string>('');
   const [activeResultTab, setActiveResultTab] = useState<'memo' | 'checklist' | 'dag'>('memo');
+  // Left panel: 'msj' | 'doc:<filename>' | 'case:<citation_id>'
+  const [leftPanel, setLeftPanel] = useState<string>('msj');
 
   useEffect(() => {
     listMatters().then(setMatters).catch(console.error);
@@ -333,6 +503,12 @@ export default function App() {
           </button>
         )}
         <button
+          onClick={() => setShowHelp(true)}
+          className="text-xs text-slate-400 hover:text-white border border-slate-700 hover:border-slate-500 rounded px-2.5 py-1.5 transition-colors"
+        >
+          ? Help
+        </button>
+        <button
           onClick={() => setShowKeySettings(true)}
           className={`flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg border transition-colors ${
             hasApiKey
@@ -343,6 +519,8 @@ export default function App() {
           {hasApiKey ? '🔑 API Key' : '⚠ Set API Key'}
         </button>
       </header>
+
+      {showHelp && <HelpPanel onClose={() => setShowHelp(false)} />}
 
       {showKeySettings && (
         <ApiKeySettings
@@ -526,7 +704,7 @@ export default function App() {
                         Bench Memo
                       </button>
                       <button
-                        onClick={() => setActiveResultTab('checklist')}
+                        onClick={() => { setActiveResultTab('checklist'); setLeftPanel('msj'); }}
                         className={`px-4 py-2.5 text-xs font-medium border-b-2 transition-colors ${
                           activeResultTab === 'checklist'
                             ? 'border-indigo-600 text-indigo-600'
@@ -615,25 +793,39 @@ export default function App() {
                     {/* Citation Review: checklist + inline case text panel */}
                     {activeResultTab === 'checklist' && (
                       <div className="flex-1 overflow-hidden flex">
-                        {/* MSJ on the left */}
+                        {/* Left: MSJ or retrieved case text */}
                         <div className="w-[40%] shrink-0 border-r border-slate-200 overflow-hidden">
-                          <DocumentViewer
-                            matter={activeMatter}
-                            filename={activeDocFilename}
-                            citationStrings={citationHighlights}
-                            canExtract={false}
-                            extracting={false}
-                            onExtract={() => {}}
-                          />
+                          {leftPanel === 'msj' ? (
+                            <DocumentViewer
+                              matter={activeMatter}
+                              filename={activeDocFilename}
+                              citationStrings={citationHighlights}
+                              canExtract={false}
+                              extracting={false}
+                              onExtract={() => {}}
+                            />
+                          ) : leftPanel.startsWith('case:') ? (
+                            (() => {
+                              const citId = leftPanel.slice(5);
+                              const rc = retrievedCases.find((r) => r.citation_id === citId);
+                              return rc ? (
+                                <CaseTextPanel retrieved={rc} onBack={() => setLeftPanel('msj')} />
+                              ) : (
+                                <div className="p-4 text-xs text-slate-400">Case text not available</div>
+                              );
+                            })()
+                          ) : null}
                         </div>
-                        {/* Checklist on the right */}
+                        {/* Right: Checklist */}
                         <div className="flex-1 overflow-y-auto p-4">
                           <p className="text-xs text-slate-500 mb-3">
-                            Review each citation. Accept, flag, or add a note and rerun. Export the full audit trail when done.
+                            Click any citation to expand the AI analysis. Use <strong>View case text</strong> to read the retrieved opinion alongside the brief. Accept, flag, or rerun each item, then export the audit trail.
                           </p>
                           <ResolutionChecklist
                             report={report}
                             checklist={checklist}
+                            retrievedCases={retrievedCases}
+                            onViewCaseText={(citId) => setLeftPanel(`case:${citId}`)}
                             onUpdate={updateChecklistItem}
                             onRerun={async (itemId, note) => {
                               const result = await rerunCitation(itemId, note);

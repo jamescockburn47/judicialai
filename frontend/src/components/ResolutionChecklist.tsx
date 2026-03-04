@@ -1,10 +1,12 @@
 import { useState } from 'react';
-import type { AnalysisReport, ChecklistItem, ValidationResult } from '../types';
+import type { AnalysisReport, ChecklistItem, RetrievedCase, ValidationResult } from '../types';
 import { VerdictBadge } from './VerdictBadge';
 
 interface Props {
   report: AnalysisReport;
   checklist: ChecklistItem[];
+  retrievedCases: RetrievedCase[];
+  onViewCaseText: (citationId: string) => void;
   onUpdate: (id: string, update: Partial<ChecklistItem>) => void;
   onRerun: (itemId: string, note: string) => Promise<void>;
 }
@@ -43,7 +45,7 @@ function CitationDetail({ result }: { result: ValidationResult }) {
   );
 }
 
-export function ResolutionChecklist({ report, checklist, onUpdate, onRerun }: Props) {
+export function ResolutionChecklist({ report, checklist, retrievedCases, onViewCaseText, onUpdate, onRerun }: Props) {
   const [notes, setNotes] = useState<Record<string, string>>({});
   const [rerunning, setRerunning] = useState<Record<string, boolean>>({});
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
@@ -112,11 +114,13 @@ export function ResolutionChecklist({ report, checklist, onUpdate, onRerun }: Pr
         <p className="text-[10px] text-slate-400 font-medium uppercase tracking-wide mb-2">
           Citations ({citationItems.length})
         </p>
-        <div className="flex flex-col gap-2">
+          <div className="flex flex-col gap-2">
           {citationItems.map((item) => {
             const validationResult = report.validation_results.find(
               (v) => v.citation_id === item.id || v.citation_string === item.label,
             );
+            const retrieved = retrievedCases.find((r) => r.citation_id === item.id);
+            const hasText = retrieved?.full_text && retrieved.full_text.length > 200;
             const isExpanded = expanded[item.id];
 
             return (
@@ -144,6 +148,23 @@ export function ResolutionChecklist({ report, checklist, onUpdate, onRerun }: Pr
                       )}
                       {item.rerun_count > 0 && (
                         <span className="text-[10px] text-indigo-600">↻ {item.rerun_count}×</span>
+                      )}
+                      {/* View case text button */}
+                      <button
+                        onClick={() => onViewCaseText(item.id)}
+                        className={`text-[10px] rounded px-1.5 py-0.5 border transition-colors ${
+                          hasText
+                            ? 'border-indigo-200 text-indigo-600 hover:bg-indigo-50'
+                            : 'border-slate-200 text-slate-400 hover:border-slate-300'
+                        }`}
+                        title={hasText ? 'View retrieved case text' : 'Case text not available'}
+                      >
+                        {hasText ? 'View case text →' : 'No case text'}
+                      </button>
+                      {retrieved?.cite_count === 0 && (
+                        <span className="text-[10px] bg-red-100 text-red-700 rounded px-1.5 py-0.5">
+                          ⚠ 0 citations in graph
+                        </span>
                       )}
                     </div>
                     <p className="mt-0.5 text-xs text-slate-800 font-mono break-words">{item.label}</p>
