@@ -47,7 +47,7 @@ export interface RetrievedCase {
   /** Number of times cited in CourtListener. 0 = fabrication signal. null = not retrieved. */
   cite_count: number | null;
   resolution_method: string;
-  status: 'resolved' | 'not_found' | 'not_indexed' | 'unresolvable' | { error: string };
+  status: 'resolved' | 'resolved_no_text' | 'not_found' | 'not_indexed' | 'unresolvable' | { error: string };
 }
 
 export interface ApprovedCitation {

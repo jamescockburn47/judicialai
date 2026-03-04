@@ -112,7 +112,7 @@ function CaseTextView({
 
       {/* Case text */}
       <div className="flex-1 overflow-y-auto p-4">
-        {!retrieved || retrieved.status === 'unresolvable' || retrieved.status === 'not_found' || retrieved.status === 'not_indexed' ? (
+        {!retrieved || (retrieved.status === 'unresolvable' || retrieved.status === 'not_found' || retrieved.status === 'not_indexed' || retrieved.status === 'resolved_no_text') ? (
           <div className="flex flex-col gap-2 text-slate-500 text-sm">
             <p className="font-medium text-amber-700">Case not found in public databases</p>
             <p className="text-xs text-slate-500 leading-relaxed">
@@ -181,7 +181,7 @@ export function CitationReviewPanel({
   }
 
   const resolved = retrievedCases.filter((r) => r.status === 'resolved').length;
-  const unresolvable = retrievedCases.filter((r) => r.status === 'unresolvable' || r.status === 'not_found' || r.status === 'not_indexed').length;
+  const unresolvable = retrievedCases.filter((r) => r.status === 'unresolvable' || r.status === 'not_found' || r.status === 'not_indexed' || r.status === 'resolved_no_text').length;
 
   return (
     <div className="flex flex-col flex-1 min-h-0">
@@ -225,7 +225,7 @@ export function CitationReviewPanel({
         {citations.map((c) => {
           const retrieved = getRetrieved(c.id);
           const approved = isApproved(c.id);
-          const unresolvable = !retrieved || retrieved.status === 'unresolvable' || retrieved.status === 'not_found' || retrieved.status === 'not_indexed';
+          const unresolvable = !retrieved || (retrieved.status === 'unresolvable' || retrieved.status === 'not_found' || retrieved.status === 'not_indexed' || retrieved.status === 'resolved_no_text');
 
           return (
             <div
@@ -251,7 +251,7 @@ export function CitationReviewPanel({
                       }`}
                     >
                       {unresolvable
-                        ? (retrieved?.status === 'not_indexed' ? 'Not indexed (not a fabrication signal)' : 'Not found in databases')
+                        ? (retrieved?.status === 'resolved_no_text' ? 'Exists — no text' : retrieved?.status === 'not_found' ? 'Not found in databases' : 'Not indexed')
                         : `${Math.round((retrieved?.confidence ?? 0) * 100)}% match`}
                     </span>
                     {/* Cite count — key fabrication signal */}

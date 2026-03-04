@@ -198,6 +198,8 @@ function CaseTextPanel({
   onBack?: () => void;
 }) {
   const hasFullText = retrieved.full_text && retrieved.full_text.length > 200;
+  const isNotFound = retrieved.status === 'not_found';
+  const isResolvedNoText = retrieved.status === 'resolved_no_text';
   const textSource = hasFullText
     ? (retrieved.resolution_method?.includes('pdf') || retrieved.full_text!.length > 1000
         ? 'Full opinion text (PDF)'
@@ -235,24 +237,24 @@ function CaseTextPanel({
           </pre>
         ) : (
           <div className="text-sm text-slate-500 space-y-2">
-            <p className={`font-medium ${retrieved.status === 'not_found' ? 'text-red-700' : retrieved.status === 'not_indexed' ? 'text-slate-700' : 'text-slate-600'}`}>
-              {retrieved.status === 'not_found'
+            <p className={`font-medium ${isNotFound ? 'text-red-700' : isResolvedNoText ? 'text-amber-700' : 'text-slate-600'}`}>
+              {isNotFound
                 ? 'Not found in CourtListener'
-                : retrieved.status === 'not_indexed'
-                ? 'Not in CourtListener\'s free index'
+                : isResolvedNoText
+                ? 'Case confirmed — full text not available'
                 : 'Full text not available'}
             </p>
             <p className="text-xs leading-relaxed">
-              {retrieved.status === 'not_found'
-                ? `Searched CourtListener but found no matching case. Citation count: ${retrieved.cite_count ?? 'unknown'}. A real case used in a brief almost always appears in citation databases — this is a strong fabrication signal.`
-                : retrieved.status === 'not_indexed'
-                ? `California Court of Appeal decisions (${retrieved.resolution_method.includes('Cal.App') ? 'Cal.App.4th/5th' : 'this reporter series'}) are not in CourtListener's free database. This is not a fabrication signal — these are legitimate published decisions.`
+              {isNotFound
+                ? `Searched CourtListener by exact citation, case name, and quoted text. Found nothing. Citation count: ${retrieved.cite_count ?? 0}. A real case used in a brief almost always appears in citation databases — this is a strong fabrication signal.`
+                : isResolvedNoText
+                ? `This case was found in CourtListener (${retrieved.title ?? 'see URL'}, cite_count=${retrieved.cite_count ?? '?'}) but the full opinion text is not available through this retrieval path. The case's existence is confirmed. The AI verdict on the proposition will be marked UNVERIFIABLE — no text means no proposition check.`
                 : 'The case was found but full opinion text could not be retrieved.'}
             </p>
-            {retrieved.status === 'not_indexed' && (
-              <div className="bg-blue-50 border border-blue-200 rounded p-2 text-xs text-blue-700">
-                <p className="font-medium mb-0.5">AI assessment method</p>
-                <p>The validator assessed this citation using Claude's training knowledge of California appellate decisions, rather than retrieved text. The verdict reflects the plausibility of the claimed proposition based on known case law.</p>
+            {isResolvedNoText && (
+              <div className="bg-amber-50 border border-amber-200 rounded p-2 text-xs text-amber-700">
+                <p className="font-medium">Existence confirmed — proposition not verifiable</p>
+                <p className="mt-0.5">The validator has confirmed the case exists but cannot assess whether the brief's claimed proposition is accurate without the text. The verdict will be UNVERIFIABLE for the proposition.</p>
               </div>
             )}
             <p className="text-[10px] text-slate-400 font-mono">{retrieved.resolution_method}</p>

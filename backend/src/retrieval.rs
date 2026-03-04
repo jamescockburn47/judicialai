@@ -1,14 +1,19 @@
 /// Case retrieval from CourtListener.
 ///
 /// Strategy:
-/// 1. Case name search → gets citeCount (key fabrication signal) + metadata
-/// 2. If found: fetch PDF from CourtListener S3 storage → extract full text
-/// 3. Quoted citation text search as fallback when no case name
+/// 1. Citation lookup API (most precise — matches exact volume/reporter/page)
+/// 2. Case name search (fallback when citation lookup returns nothing)
 ///
-/// The citeCount field is critical: a fabricated case will have 0 citations
-/// in CourtListener's citation graph. A real but obscure case may have 1-5.
-/// A well-known case like Privette has 261. This distinguishes "fabricated"
-/// from "unpublished/obscure" when a case cannot be retrieved.
+/// Full text:
+/// - Authenticated opinions/ endpoint → html_with_citations → html2text
+/// - Harvard PDF via S3 storage
+/// - If no text retrieved: status = Unverifiable (text required for validation)
+///
+/// The pipeline distinguishes:
+/// - Resolved: case found AND full text retrieved → validator can check proposition
+/// - ResolvedNoText: case found but text unavailable → existence confirmed, proposition unverifiable
+/// - NotFound: actively searched, not found → fabrication signal (cite_count=0)
+/// - Unverifiable: could not determine status
 use std::time::Duration;
 
 use anyhow::Result;
@@ -20,6 +25,7 @@ const USER_AGENT: &str =
     "JudicialReview/0.1 (citation verification tool; contact: legalquant@protonmail.me)";
 const COURTLISTENER_SEARCH: &str = "https://www.courtlistener.com/api/rest/v4/search/";
 const COURTLISTENER_OPINIONS: &str = "https://www.courtlistener.com/api/rest/v4/opinions/";
+const COURTLISTENER_CITATION_LOOKUP: &str = "https://www.courtlistener.com/api/rest/v4/citation-lookup/";
 const CL_STORAGE_BASE: &str = "https://storage.courtlistener.com/";
 
 /// Read optional CourtListener API token from environment.
@@ -82,6 +88,29 @@ struct ClOpinion {
     local_path: Option<String>,
     #[serde(rename = "type")]
     opinion_type: Option<String>,
+}
+
+// ── CourtListener citation lookup types ──────────────────────────────────────
+
+#[allow(dead_code)]
+#[derive(Debug, Deserialize)]
+struct CitationLookupResponse {
+    citation: Option<String>,
+    clusters: Option<Vec<LookupCluster>>,
+    status: Option<u32>,
+    error_message: Option<String>,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Deserialize)]
+struct LookupCluster {
+    id: Option<u64>,
+    absolute_url: Option<String>,
+    case_name: Option<String>,
+    date_filed: Option<String>,
+    citation_count: Option<u32>,
+    sub_opinions: Option<Vec<String>>,
+    filepath_pdf_harvard: Option<String>,
 }
 
 // ── PDF text extraction ───────────────────────────────────────────────────────
@@ -220,6 +249,111 @@ fn compute_confidence(
     }
 
     score.clamp(0.0, 0.97)
+}
+
+// ── Strategy 0: citation lookup by volume/reporter/page (most precise) ───────
+
+/// Uses CourtListener's citation-lookup endpoint which matches exact
+/// volume + reporter + page. This works for Cal.App.4th and other
+/// reporters that the search endpoint doesn't index well.
+async fn lookup_by_citation(
+    client: &reqwest::Client,
+    citation: &ExtractedCitation,
+) -> Option<RetrievedCase> {
+    let token = cl_api_token()?;
+    let (volume, page) = match (&citation.volume, &citation.page) {
+        (Some(v), Some(p)) => (v.clone(), p.clone()),
+        _ => return None,
+    };
+
+    // Normalize reporter: "Cal.App.4th" → "Cal. App. 4th"
+    let reporter = normalize_reporter(&citation.reporter);
+
+    let body = serde_json::json!({
+        "reporter": reporter,
+        "volume": volume.parse::<u32>().unwrap_or(0),
+        "page": page.parse::<u32>().unwrap_or(0),
+    });
+
+    let resp = client
+        .post(COURTLISTENER_CITATION_LOOKUP)
+        .header("Authorization", format!("Token {}", token))
+        .header("Content-Type", "application/json")
+        .json(&body)
+        .send()
+        .await
+        .ok()?;
+
+    if !resp.status().is_success() { return None; }
+
+    let lookup: CitationLookupResponse = resp.json().await.ok()?;
+    let clusters = lookup.clusters.as_ref()?;
+    if clusters.is_empty() { return None; }
+
+    let cluster = &clusters[0];
+
+    // Extract opinion ID from sub_opinions URL
+    let opinion_id = cluster.sub_opinions.as_ref()
+        .and_then(|ops| ops.first())
+        .and_then(|url| {
+            url.trim_end_matches('/').split('/').last()
+                .and_then(|s| s.parse::<u64>().ok())
+        });
+
+    // Try to get full text
+    let full_text = fetch_full_text(
+        client,
+        opinion_id,
+        cluster.filepath_pdf_harvard.as_deref(),
+    ).await;
+
+    let has_full_text = full_text.as_ref().map(|t| t.len() > 200).unwrap_or(false);
+
+    let case_url = cluster.absolute_url.as_ref().map(|p| {
+        if p.starts_with("http") { p.clone() }
+        else { format!("https://www.courtlistener.com{}", p) }
+    }).unwrap_or_default();
+
+    let status = if has_full_text {
+        RetrievalStatus::Resolved
+    } else {
+        RetrievalStatus::ResolvedNoText
+    };
+
+    Some(RetrievedCase {
+        citation_id: citation.id.clone(),
+        url: case_url,
+        source: "courtlistener".to_string(),
+        confidence: if has_full_text { 0.92 } else { 0.70 },
+        title: cluster.case_name.clone(),
+        court_name: None,
+        decision_date: cluster.date_filed.clone(),
+        full_text,
+        cite_count: cluster.citation_count,
+        resolution_method: "courtlistener_citation_lookup".to_string(),
+        status,
+    })
+}
+
+/// Normalize our internal reporter codes to CourtListener's normalized format
+fn normalize_reporter(reporter: &str) -> &str {
+    match reporter {
+        "Cal.App.4th" => "Cal. App. 4th",
+        "Cal.App.5th" => "Cal. App. 5th",
+        "Cal.App.3d"  => "Cal. App. 3d",
+        "Cal.4th"     => "Cal. 4th",
+        "Cal.3d"      => "Cal. 3d",
+        "Cal.5th"     => "Cal. 5th",
+        "F.2d"        => "F.2d",
+        "F.3d"        => "F.3d",
+        "F.4th"       => "F.4th",
+        "F.Supp.2d"   => "F. Supp. 2d",
+        "F.Supp.3d"   => "F. Supp. 3d",
+        "S.W.3d"      => "S.W.3d",
+        "So.3d"       => "So. 3d",
+        "N.Y.3d"      => "N.Y.3d",
+        other         => other,
+    }
 }
 
 // ── Strategy 1: case name search ─────────────────────────────────────────────
@@ -398,51 +532,35 @@ pub async fn resolve_citation(citation: &ExtractedCitation) -> RetrievedCase {
         Err(e) => return unresolvable(citation, &format!("client error: {}", e)),
     };
 
+    // Strategy 0: citation lookup by volume/reporter/page (most precise, works for Cal.App.4th)
+    // This uses the authenticated citation-lookup endpoint which matches exact citations
+    if citation.volume.is_some() && citation.page.is_some() {
+        if let Some(found) = lookup_by_citation(&client, citation).await {
+            return found;
+        }
+        rate_pause().await;
+    }
+
+    // Strategy 1: case name search
     if citation.case_name.is_some() {
         let result = search_by_case_name(&client, citation).await;
         if let Some(r) = result {
             return r;
         }
+        rate_pause().await;
     }
 
-    rate_pause().await;
-
+    // Strategy 2: quoted citation text search
     if let Some(found) = search_by_citation_text(&client, citation).await {
         return found;
     }
 
-    unresolvable(citation, "not found in CourtListener by name or quoted citation")
+    unresolvable(citation, "not found in CourtListener by citation lookup, name search, or quoted citation")
 }
 
 fn unresolvable(citation: &ExtractedCitation, reason: &str) -> RetrievedCase {
-    // Distinguish between "not found" (possible fabrication) and "not indexed"
-    // (real court whose decisions aren't in CourtListener's free index)
-    let not_indexed_reporters = [
-        "Cal.App.4th", "Cal.App.5th", "Cal.App.3d",  // Cal. Court of Appeal
-        "Cal.Rptr.3d", "Cal.Rptr.2d",                 // Cal. unofficial reporters
-        "N.Y.S.3d", "N.Y.S.2d",                        // NY Sup/App Div
-        "A.3d", "A.2d",                                 // Atlantic Reporter (state courts)
-        "So.2d",                                        // Southern Reporter older
-        "S.E.2d", "S.E.3d",                            // South-Eastern Reporter
-        "N.W.2d", "N.W.3d",                            // North-Western Reporter
-        "P.3d", "P.2d",                                 // Pacific Reporter (state)
-        "S.W.2d",                                       // South-Western Reporter older
-    ];
-
-    let is_not_indexed = not_indexed_reporters.contains(&citation.reporter.as_str());
-
-    let status = if is_not_indexed {
-        RetrievalStatus::NotIndexed
-    } else {
-        RetrievalStatus::NotFound
-    };
-
-    let resolution_method = if is_not_indexed {
-        format!("not_indexed: {} decisions are not in CourtListener's free index ({})", citation.reporter, reason)
-    } else {
-        format!("not_found: {}", reason)
-    };
-
+    // All strategies tried — case not found in CourtListener
+    // This is a NotFound result: searched actively, found nothing
     RetrievedCase {
         citation_id: citation.id.clone(),
         url: String::new(),
@@ -452,9 +570,9 @@ fn unresolvable(citation: &ExtractedCitation, reason: &str) -> RetrievedCase {
         court_name: None,
         decision_date: None,
         full_text: None,
-        cite_count: None,
-        resolution_method,
-        status,
+        cite_count: Some(0),
+        resolution_method: format!("not_found: {}", reason),
+        status: RetrievalStatus::NotFound,
     }
 }
 

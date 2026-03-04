@@ -17,22 +17,19 @@ You will be given:
 3. Retrieved case information: full text (if available), title, cite count
 4. The cite_count: number of times this case appears in CourtListener's citation graph
 
-CRITICAL SIGNALS:
-- cite_count = 0 with no case text AND status = not_found: very strong indicator of fabrication. A case used in a brief almost always appears somewhere in citation databases. No case text + zero citations + not found = likely fabricated.
-- cite_count > 50: well-established case, existence verified
-- status = not_indexed: this case is in a reporter series (e.g. Cal.App.4th, N.Y.S.3d) that is NOT indexed in CourtListener's free database. This is NOT a fabrication signal — these are legitimate published decisions. Use your training knowledge of the case and jurisdiction to assess whether the proposition is plausible.
-- Case text retrieved: assess whether the proposition and any quote match the actual text
+CRITICAL RULES:
+1. FABRICATED: status=not_found, cite_count=0. Case was actively searched and not found. Use this verdict.
+2. UNVERIFIABLE (proposition): status=resolved_no_text. Case CONFIRMED TO EXIST but no text to check the proposition against. You must say: "Case confirmed to exist (cite_count=N) but full text not retrieved — proposition cannot be verified from available sources." Do NOT guess what the case holds.
+3. VERIFIED/SUSPECT/MISUSED: only when full text is in the CASE_TEXT section below. Assess the proposition against the actual retrieved text.
+4. Do NOT use training knowledge to assess what a case holds. Only the retrieved text counts for proposition verification.
+5. For quote accuracy: search the case text character by character. Any word not in the retrieved text must be flagged.
 
 Your verdicts:
-- VERIFIED: Case exists, supports the stated proposition, any quote is accurate
-- SUSPECT: Case exists but proposition overstated, taken out of context, or quote modified (e.g. "never" added to conditional holding)
-- MISUSED: Case is real but holds something materially different from the claimed proposition — doctrinal transplant
-- FABRICATED: Case does not appear to exist in any verified legal database (status=not_found, cite_count=0, no text, implausible details)
-- UNVERIFIABLE: Cannot assess from available information — be explicit about WHY and what additional verification would require
-
-For not_indexed cases: assess plausibility from (1) your training knowledge of the case if you recognise it, (2) whether the proposition is consistent with the jurisdiction's established law, (3) whether the citation details (year, court, reporter volume/page) are internally consistent. Do not default to UNVERIFIABLE simply because no text was retrieved — make an assessment and explain it.
-
-For quote accuracy: if quoted text is provided, search for it verbatim in the case text. Flag any word omissions, substitutions, or additions — including absolute words like "never" or "always" that overstate a conditional holding.
+- FABRICATED: not_found, cite_count=0, no text — case does not appear to exist
+- UNVERIFIABLE: case found (cite_count>0) but text not retrieved, OR retrieval failed — cannot assess proposition
+- VERIFIED: full text retrieved, proposition accurate, quote accurate
+- SUSPECT: full text retrieved, proposition overstated/out of context/quote modified
+- MISUSED: full text retrieved, case holds something materially different
 
 Return ONLY valid JSON."#;
 
@@ -61,21 +58,28 @@ pub async fn validate_citation(
 
     let retrieval_info = approved.retrieved_case.as_ref().map(|r| {
         let status_note = match &r.status {
-            crate::types::RetrievalStatus::Resolved => "Found and retrieved".to_string(),
-            crate::types::RetrievalStatus::NotFound => format!(
-                "NOT FOUND in CourtListener (cite_count={}). This is a potential fabrication signal — a real case used in a brief almost always appears somewhere in citation databases.",
+            crate::types::RetrievalStatus::Resolved => format!(
+                "FOUND — full text retrieved ({} chars). Validate proposition against this text.",
+                r.full_text.as_deref().map(|t| t.len()).unwrap_or(0)
+            ),
+            crate::types::RetrievalStatus::ResolvedNoText => format!(
+                "FOUND in CourtListener (cite_count={}) but full text not available. \
+                 You CAN confirm the case exists. You CANNOT verify the proposition or quote — \
+                 verdict must be UNVERIFIABLE for the proposition aspect. \
+                 Clearly state: case confirmed to exist, proposition unverifiable without text.",
                 r.cite_count.unwrap_or(0)
             ),
-            crate::types::RetrievalStatus::NotIndexed => format!(
-                "Not indexed in CourtListener (reporter: {} — state court decisions in this reporter series are not in CourtListener's free index). This is NOT a fabrication signal. Assess plausibility from the citation details, year, court, and whether the proposition is consistent with the jurisdiction's law.",
-                r.citation_id // will be replaced with reporter below
+            crate::types::RetrievalStatus::NotFound => format!(
+                "NOT FOUND — searched CourtListener by citation lookup, case name, and quoted citation. \
+                 cite_count={}. A real case used in a brief almost always appears in citation databases. \
+                 This is a strong fabrication signal.",
+                r.cite_count.unwrap_or(0)
             ),
             crate::types::RetrievalStatus::Error(e) => format!("Retrieval error: {}", e),
         };
         format!(
-            "Status: {}\nSource: {} | Title: {} | Court: {} | Date: {} | Cite count in graph: {} | URL: {}",
+            "Retrieval status: {}\nTitle: {} | Court: {} | Date: {} | Cite count: {} | URL: {}",
             status_note,
-            r.source,
             r.title.as_deref().unwrap_or("(unknown)"),
             r.court_name.as_deref().unwrap_or("(unknown)"),
             r.decision_date.as_deref().unwrap_or("(unknown)"),

@@ -38,13 +38,14 @@ pub struct RetrievedCase {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum RetrievalStatus {
-    /// Case found and text retrieved
+    /// Case found AND full text retrieved — proposition can be validated
     Resolved,
-    /// Searched but not found in any indexed database — potential fabrication signal
+    /// Case found in CourtListener but full text not available
+    /// Existence is confirmed; proposition cannot be verified without text
+    ResolvedNoText,
+    /// Searched CourtListener by name and citation — not found
+    /// Strong fabrication signal when paired with cite_count=0
     NotFound,
-    /// Case exists in a jurisdiction/database not indexed (e.g. Cal.App.4th in CourtListener)
-    /// Not a fabrication signal — just outside current coverage
-    NotIndexed,
     /// Technical retrieval error
     Error(String),
 }
