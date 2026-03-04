@@ -1,196 +1,175 @@
-# BS Detector
+# Judicial Review — Citation Verification System
 
-A multi-agent AI pipeline that detects fabricated, misused, and inaccurate legal citations in court documents. Built as a take-home engineering challenge for Learned Hand AI.
-
-**Test case:** *Rivera v. Harmon Construction Group, Inc.*, BC-2023-04851 — Defendant's Motion for Summary Judgment
+A multi-agent AI pipeline that detects fabricated, misused, and inaccurate legal citations in court documents. Built as a take-home engineering challenge for Learned Hand AI. The first test matter is *Rivera v. Harmon Construction Group, Inc.*, BC-2023-04851.
 
 ---
 
-## Process
+## Process and time
 
-About an hour before writing any code, I read all four documents in full and worked through the MSJ by hand in Claude. That pre-reading identified the four material problems in the motion before a single line of architecture was sketched:
+About an hour before writing any code, I read all four case documents in full and worked through the MSJ manually in Claude. That pre-reading identified the four material problems in the motion before any architecture was sketched:
 
-1. **Kellerman v. Pacific Coast Construction** (887 F.2d 1204, 9th Cir. 1991) — almost certainly fabricated. The holding — that OSHA compliance creates a rebuttable presumption of reasonable care in negligence — is not a recognised 9th Circuit rule, the case name is generic, and the quoted language is suspiciously clean.
-2. **Seabright Insurance Co. v. US Airways** (52 Cal.4th 590, 2011) — real case, wrong doctrine. The MSJ uses it to support statutory compliance as probative of due care. Seabright actually concerns the Privette doctrine and delegation of safety duties to independent contractors.
-3. **Privette v. Superior Court** (5 Cal.4th 689, 1993) — real case, suspect quote. The word "never" in the attributed quotation overstates the holding; the Hooker line of cases establishes recognised exceptions.
-4. **Footnote 1** — six string citations with no propositions, including two out-of-jurisdiction cases (*Dixon v. Lone Star Structural* (Tex. App.) and *Okafor v. Brightline Builders* (Fla. Dist. Ct. App.)) cited without explanation in a California motion. Classic hallucination-padding: bulk citations that create an appearance of doctrinal depth but add nothing to a California negligence argument.
+1. **Kellerman v. Pacific Coast Construction** (887 F.2d 1204, 9th Cir. 1991) — almost certainly fabricated. The OSHA presumption holding is not a recognised 9th Circuit rule, the case name is generic, and the quoted language is suspiciously clean.
+2. **Seabright Insurance Co. v. US Airways** (52 Cal.4th 590, 2011) — real case, wrong doctrine. Seabright concerns the Privette doctrine and delegation of safety duties; the MSJ misattributes it to statutory compliance.
+3. **Privette v. Superior Court** (5 Cal.4th 689, 1993) — real case, suspect quote. "Never" in the attributed quotation overstates a conditional holding; Hooker exceptions exist.
+4. **Footnote 1** — six string citations with no propositions, including two out-of-jurisdiction cases (Texas, Florida) with no explanation in a California motion. Classic hallucination padding.
 
-That pre-reading shaped every architecture decision that followed.
+I then reviewed two prior repositories: **Collate** (a Rust/React resolution checklist tool) and **CaseKit** (a Tauri desktop app with a UK citation resolution module). Both contributed architecture but neither was extended directly — the brief called for a server-side API and the design needed to be built around the specific problems identified rather than retrofitted.
 
-I then reviewed my existing repositories to assess what could be reused. Two were relevant:
-
-- **Collate** (`github.com/legalquant/Collate`) — a Rust/WASM + React litigation tool built around a resolution checklist interaction model. The core mechanic — a lawyer reviews each flagged item and accepts, rejects, or defers with a note — maps directly onto judicial citation review.
-- **CaseKit** (`github.com/legalquant/casekit`) — a Tauri desktop app for civil litigants that includes a citation resolution module. The module queries BAILII and Find Case Law (UK sources) using a five-strategy cascade with confidence scoring. The architecture is directly portable; only the source endpoints needed to change from UK to US databases.
-
-I decided to build from scratch rather than extend either codebase, for two reasons: the scope of the brief called for a server-side API rather than a client-side tool, and building fresh allowed the architecture to be designed specifically around the four identified problems rather than retrofitted to an existing UI.
-
-I used Cursor to scaffold and generate the implementation, directing it with the architectural brief and the pre-analysis of the MSJ. The architecture was designed before any prompting began.
+The implementation was built using **Cursor** with Anthropic Claude as the coding assistant. The architecture and prompting approach were designed before any code generation began. Total coding time was just over **6 hours**, with an additional hour of pre-reading and architecture design before the clock started.
 
 ---
 
-## Architecture
+## Where this meets the brief
 
-The pipeline runs sequentially. Each stage only runs after the user confirms the previous stage. The AI never sees a case text the user has not first reviewed.
+The brief asked for:
 
-```
-[Deterministic Rust parser]    →  Citation strings extracted from MSJ
-         ↓                         No LLM. CaseKit citation patterns adapted to US reporters.
-[CourtListener / CAP APIs]     →  Full case texts fetched from public US databases
-         ↓
-  [User approval gate]         →  Cases displayed for verification before any AI call
-         ↓
-[Sonnet claude-sonnet-4-5]     →  Propositions extracted per citation from the MSJ
-         ↓
-[Opus claude-opus-4-5]         →  Validator: case text + proposition → verdict + reasoning
-         ↓
-[Opus claude-opus-4-5]         →  Consistency: SUMF assertions cross-referenced against
-                                   police report, medical records, witness statement
-         ↓
-[Opus claude-opus-4-5]         →  Graph mapper: argument dependency DAG
-         ↓
-[Opus claude-opus-4-5]         →  Judicial memo: one paragraph for the judge
-         ↓
-  [Collate-style checklist]    →  Accept / Flag / Rerun per item. Export audit trail.
-```
-
-**Verdict types returned by the Validator:**
-
-| Verdict | Meaning |
-|---------|---------|
-| `verified` | Case supports the stated proposition |
-| `suspect` | Arguable support, but proposition is overstated, taken out of context, or relies on dicta |
-| `misused` | Case is real but holds something materially different |
-| `fabricated` | Case likely does not exist; combination of name, reporter, and holding is implausible |
-| `unverifiable` | Case text not retrieved; assessed for plausibility only |
+| Requirement | Status |
+|---|---|
+| Extract all citations from the MSJ | ✓ All 10 extracted (4 body, 6 footnote) by deterministic Rust parser |
+| Assess whether cited authority supports the stated proposition | ✓ Claude Opus validates each citation against retrieved full text |
+| Flag direct quotes for accuracy | ✓ Quote accuracy checked verbatim against case text |
+| Structured JSON output | ✓ Full `AnalysisReport` struct with typed verdict fields |
+| Eval harness (precision, recall, hallucination rate) | ✓ `cargo run --bin evals` — 3 ground truths, threshold-based reporting |
+| Cross-document consistency check | ✓ SUMF assertions cross-referenced against police report, medical records, witness statement |
+| Express uncertainty appropriately | ✓ `unverifiable` verdict with explicit explanation of what was and was not searched |
+| Pass structured data between agents, not raw text | ✓ Typed Rust structs at every stage |
+| At least 4 well-defined agents with distinct roles | ✓ 5 agents: extractor (deterministic), propositions, validator, consistency, graph/memo |
+| Confidence scoring with reasoning | ✓ High/medium/low per verdict, multi-signal score on retrieval |
+| Judicial memo agent | ✓ Structured 5-section bench memo |
+| Agent orchestration with failure handling | ✓ Sequential pipeline, each stage returns errors rather than silently continuing |
+| UI displaying report in readable form | ✓ Tauri desktop app with 3-panel layout |
+| Reflection document | ✓ This document and REFLECTION.md |
 
 ---
 
-## Design decisions
+## Where this departs from or exceeds the brief
 
-**Human verification before AI validation.** The approval gate between retrieval and validation is the most important design choice. The pipeline retrieves the full case text and displays it to the user before Opus sees it. The user can confirm the right case was found, substitute a corrected citation, or mark it unverifiable. This means the validator always works from a primary source the user has reviewed — not from Claude's training data about what a case holds.
+### Departures
 
-This also means the tool degrades gracefully if the AI is unavailable. Citation strings are extracted deterministically. Cases are retrieved and displayed from public databases. A user can read the case text and assess the proposition manually, without running the AI pipeline at all. The AI layer adds speed and structure; it is not a dependency for the core verification task.
+**Technology stack.** The brief specified Python/FastAPI. This is built in Rust/Axum with a React/Tauri frontend. The reasons: Rust gives deterministic, panic-free citation parsing; the Tauri stack matches the builder's existing tooling (Collate, CaseKit); and building in a different stack demonstrates more than extending a provided scaffold. The API contract (`POST /analyze` returning structured JSON) is identical to what the brief required.
 
-**Deterministic citation extraction.** A Rust regex parser adapted from CaseKit handles US reporter formats (`F.2d`, `F.3d`, `F.4th`, `F.Supp.2d/3d`, `Cal.4th/5th`, `S.W.3d`, `So.3d`, `N.Y.3d`, etc.). No LLM call at this stage. Pattern matching is more reliable than a model call for structured strings, and failures are explicit rather than silent.
+**Anthropic instead of OpenAI.** The brief specified OpenAI. This uses Anthropic Claude (Sonnet for propositions, Opus for validation). `claude-opus-4-6` and `claude-sonnet-4-6` are used throughout. The substitution is transparent and architecturally equivalent.
 
-**Sonnet for propositions, Opus for validation.** Proposition extraction is a reading task — identify what the motion claims each case supports. Sonnet is sufficient. Validation requires legal reasoning against retrieved case text — comparing the claimed proposition to what the case actually holds. Opus for this.
+**Desktop app instead of web app.** The brief's scaffold was a localhost web app. This ships as a Tauri desktop application — a `.exe` that runs without a browser. The rationale is judicial workflow: a bench-side tool should not depend on browser security settings or tab management. The localhost API still exists and the frontend can run in a browser; Tauri is layered on top.
 
-**Fabrication and misuse are different detection problems.** Kellerman needs retrieval failure to trigger the fabricated pathway. Seabright needs the model to know what Seabright actually holds and compare it to the claimed proposition. The pipeline handles both: unresolvable retrieval routes to fabrication assessment; resolved retrieval enables doctrinal comparison. These cannot be collapsed into a single detection step.
+### Exceeds the brief
 
-**The judge makes every decision.** No prediction of outcome. No confidence score that collapses to a recommendation. The rerun mechanism means the judge's specific concern is prepended to the Validator prompt — the tool responds to judicial expertise. The export produces a full JSON audit trail: every citation, every verdict, every human decision, every rerun.
+**Three-strategy citation retrieval with authenticated full text.** The brief implied existence checking. This pipeline does three things: (1) CourtListener citation-lookup API by exact volume/reporter/page — works for all reporters including Cal.App.4th; (2) case name search; (3) quoted citation text search. With the CourtListener API token, full opinion text (up to 12,000 chars) is retrieved via `html_with_citations`. Privette returns 11,861 chars; Seabright 11,867 chars. The validator works from actual primary source text, not snippets.
 
-**Scope.** This is a scoped tool for a well-defined document. The citations to check are known and bounded. I made a deliberate decision not to build extensive edge-case handling for citation formats that do not appear in the MSJ — the test case establishes the scope, and engineering time was better spent on the depth of each pipeline stage than the breadth of citation coverage.
+**Distinction between `not_found` and `resolved_no_text`.** The pipeline distinguishes cases that were actively searched and not found (fabrication signal, cite_count=0) from cases that were found but whose text couldn't be retrieved (existence confirmed, proposition unverifiable). This is a materially different epistemological position and the validator is told explicitly which it is facing.
+
+**Citation count as fabrication signal.** `citeCount` from the CourtListener citation graph is retrieved for every case. Kellerman returns 0. Privette returns 261. This is a strong independent signal before any AI reasoning — a case used in a legal brief almost always has a citation footprint.
+
+**General-purpose matter system.** The app is not a one-shot tool for one motion. It stores matters locally at `~/Documents/JudicialReview/`, seeds the Rivera demo matter on first launch, supports creating new matters with any set of documents, and caches analysis results per matter. Rivera v. Harmon is the first test case; the tool is designed for any US legal brief.
+
+**Argument dependency map with integrity assessment.** The graph mapper assesses not just which citations support which arguments, but whether each argument *survives* when unreliable citations are removed. Argument nodes are coloured by survival status (green = intact, red = undermined). This is a layer beyond citation-level flagging — it answers the judicial question of which arguments lose their legal foundation.
+
+**Structured bench memo with five labelled sections.** The brief asked for a one-paragraph judicial summary. This generates a five-section memo: Brief Reliability Assessment (leading with the aggregate reliability verdict), Citation Integrity (per-citation analysis), Factual Record Issues (SUMF contradictions with document references), Effect on the Brief's Arguments (which arguments survive), and Key Legal Questions. The memo is exportable as `.txt`.
 
 ---
 
-## Quick Start
+## Architectural philosophy: human-in-the-loop by design
 
-### Desktop App (Tauri dev mode — recommended)
+The most significant departure from a pure AI pipeline is the **explicit human-in-the-loop architecture**. This was a deliberate design choice that goes beyond what the brief required, and it reflects a view about what a tool like this should and shouldn't do.
 
-Requires Rust and Node installed.
+**The core principle:** the AI is a research assistant, not a decision-maker. Every verdict is presented to the judge for acceptance, flagging, or rerun. The export produces a JSON audit trail of every human decision alongside every AI finding. Nothing is automatically accepted.
+
+**Why this matters for a judicial tool specifically:**
+
+- *Epistemic accountability.* A judge who relies on an AI finding without reviewing it cannot explain that reliance. The checklist architecture forces engagement — each verdict requires a human action before it enters the audit trail.
+- *The rerun mechanism.* The judge can prepend a specific concern to any validator prompt and rerun it. "Check the Hooker retained-control exception to Privette" becomes part of the prompt. The tool responds to judicial expertise rather than replacing it.
+- *Graceful degradation.* Citation extraction and case retrieval work without an API key. A user can read the MSJ alongside the retrieved case text and assess propositions manually. The AI layer adds speed and structure; it is not a hard dependency.
+- *No outcome prediction.* The tool explicitly does not predict who will win the motion. It helps the judge see the brief's citation foundation clearly. The key legal questions are framed neutrally.
+
+This is not the most efficient architecture for automated processing at scale. It is the appropriate architecture for a tool that will be used by a judge to inform a ruling.
+
+---
+
+## Technology stack
+
+| Layer | Technology |
+|---|---|
+| Backend API | Rust 1.85 + Axum 0.8 |
+| Citation extraction | Deterministic Rust regex (adapted from CaseKit) |
+| Case retrieval | CourtListener REST API v4 (citation lookup + search + opinions) |
+| AI: propositions | Anthropic `claude-sonnet-4-6` |
+| AI: validation, consistency, graph, memo | Anthropic `claude-opus-4-6` |
+| Frontend | React 19 + TypeScript + Vite + Tailwind CSS + Zustand |
+| Desktop shell | Tauri v2 |
+| State persistence | Zustand + localStorage + local JSON files |
+
+---
+
+## Quick start
+
+### Prerequisites
+- Rust (https://rustup.rs)
+- Node.js v18+
+- Anthropic API key (https://console.anthropic.com)
+
+### Launch
 
 ```bash
-cp .env.example .env
-# Add your ANTHROPIC_API_KEY to .env
+# Add your ANTHROPIC_API_KEY to .env (CourtListener token already included)
+.\launch.bat
 ```
 
-Then double-click `launch.bat` (or run `launch.ps1`). This starts:
-- The Rust/Axum backend on `http://localhost:8002`
-- The Vite dev server on `http://localhost:5175` (browser preview)
+`launch.bat` kills any existing instances on ports 8002/5175, starts the backend, and launches the Tauri desktop app. First launch compiles the Tauri shell (~3-5 min). Subsequent launches are fast.
 
-To run the full Tauri desktop window (no browser):
-```bash
-cd frontend
-npm run tauri:dev
-```
-
-### Browser-only dev
-
-```bash
-# Terminal 1
-cd backend && cargo run --bin bs-detector
-
-# Terminal 2
-cd frontend && npm run dev
-# Open http://localhost:5175
-```
+The `.env` file is committed with the CourtListener API token (free account, non-commercial use). Replace it with your own token for high-volume use: register at [courtlistener.com](https://www.courtlistener.com/sign-in/) and generate a token at `/api/rest/v4/api-token-auth/`.
 
 ---
 
-## Running the Eval Suite
+## Running the eval suite
 
 ```bash
 cd backend
 cargo run --bin evals
 ```
 
-Three ground-truth citations are run through the Validator with known expected verdicts:
+Runs 3 ground-truth citations through the Validator:
 
-| Citation | Expected | Issue |
-|----------|----------|-------|
-| Kellerman v. Pacific Coast Construction, 887 F.2d 1204 (9th Cir. 1991) | `fabricated` | OSHA presumption holding unverifiable in 9th Circuit |
+| Citation | Expected verdict | Issue |
+|---|---|---|
+| Kellerman v. Pacific Coast Construction, 887 F.2d 1204 (9th Cir. 1991) | `fabricated` | Not in CourtListener, cite_count=0 |
 | Seabright Insurance Co. v. US Airways, 52 Cal.4th 590 (2011) | `misused` | Case holds Privette delegation doctrine, not statutory compliance |
-| Privette v. Superior Court, 5 Cal.4th 689 (1993) — quoted | `suspect` | "never" overstates holding; Hooker exceptions exist |
+| Privette v. Superior Court, 5 Cal.4th 689 (1993) — quoted | `suspect` | "never" overstates conditional holding |
 
-**Metrics reported:**
-
-| Metric | Description | Pass threshold |
-|--------|-------------|----------------|
-| Recall | % of known bad citations correctly flagged | ≥ 60% |
-| Precision | % of flags that are genuine issues | ≥ 70% |
-| Hallucination rate | % of fabricated citations returned as verified | 0% |
-
-The thresholds are honest. Three cases is a minimal eval set. A pipeline that catches 2 of 3 known problems and fabricates no findings is more useful than one that claims 100% on cherry-picked tests.
+Metrics: recall ≥ 60%, precision ≥ 70%, hallucination rate 0%.
 
 ---
 
-## All Citations in the MSJ
+## All citations in the Rivera MSJ
 
-The parser extracts all 10 citations from the motion — 4 in the body, 6 in footnote 1. All 10 are retrieved and displayed for user approval before any AI validation runs.
+All 10 extracted, retrieved, and validated. Final retrieval results:
 
-**Body**
+| Citation | Reporter | Retrieval | Notes |
+|---|---|---|---|
+| Privette v. Superior Court, 5 Cal.4th 689 | Cal. Supreme | resolved, 261 cites, 11,861 chars | Full opinion text retrieved |
+| Seabright Insurance v. US Airways, 52 Cal.4th 590 | Cal. Supreme | resolved, 74 cites, 11,867 chars | Full opinion text retrieved |
+| Kellerman v. Pacific Coast Construction, 887 F.2d 1204 | 9th Circuit | not_found, 0 cites | Strong fabrication signal |
+| Whitmore v. Delgado Scaffolding, 334 F.Supp.2d 1189 | Fed. District | not_found, 0 cites | Not in CourtListener |
+| Torres v. Granite Falls Dev., 198 Cal.App.4th 223 | Cal. App. | not_found, 0 cites | Not in CourtListener |
+| Blackwell v. Sunrise Contractors, 45 Cal.App.4th 1012 | Cal. App. | not_found, 0 cites | Not in CourtListener |
+| Nguyen v. Allied Pacific Construction, 112 Cal.App.4th 845 | Cal. App. | not_found, 0 cites | Not in CourtListener |
+| Reeves v. Summit Engineering Group, 78 Cal.App.4th 531 | Cal. App. | not_found, 0 cites | Not in CourtListener |
+| Dixon v. Lone Star Structural, 387 S.W.3d 154 | Texas App. | resolved, 0 cites, ~11k chars | Wrong case matched; out-of-jurisdiction |
+| Okafor v. Brightline Builders, 291 So.3d 614 | Florida App. | not_found, 0 cites | Not in CourtListener |
 
-| Citation | Reporter | Known issue |
-|----------|----------|-------------|
-| Privette v. Superior Court, 5 Cal.4th 689 (1993) | Cal. Supreme | Suspect quote — "never" overstates holding with existing exceptions |
-| Whitmore v. Delgado Scaffolding Co., 334 F. Supp. 2d 1189 (C.D. Cal. 2004) | Federal District | Proposition plausible; requires retrieval to verify |
-| Kellerman v. Pacific Coast Construction, Inc., 887 F.2d 1204 (9th Cir. 1991) | 9th Circuit | Almost certainly fabricated |
-| Seabright Insurance Co. v. US Airways, Inc., 52 Cal.4th 590 (2011) | Cal. Supreme | Misused — case holds Privette delegation doctrine, not regulatory compliance |
-
-**Footnote 1 — string citations, no proposition stated**
-
-| Citation | Reporter | Known issue |
-|----------|----------|-------------|
-| Torres v. Granite Falls Dev. Corp., 198 Cal.App.4th 223 (2011) | Cal. App. | California; plausibility to be verified |
-| Blackwell v. Sunrise Contractors, Inc., 45 Cal.App.4th 1012 (1996) | Cal. App. | California; plausibility to be verified |
-| Dixon v. Lone Star Structural, LLC, 387 S.W.3d 154 (Tex. App. 2012) | Texas App. | Out-of-jurisdiction — Texas authority cited in a California motion with no explanation |
-| Okafor v. Brightline Builders, Inc., 291 So.3d 614 (Fla. Dist. Ct. App. 2019) | Florida App. | Out-of-jurisdiction — Florida authority cited in a California motion with no explanation |
-| Nguyen v. Allied Pacific Construction Co., 112 Cal.App.4th 845 (2003) | Cal. App. | California; plausibility to be verified |
-| Reeves v. Summit Engineering Group, 78 Cal.App.4th 531 (2000) | Cal. App. | California; plausibility to be verified |
-
-The footnote citations carry no stated proposition — they are string citations attached to footnote 1, which is anchored to the Seabright sentence. The two out-of-jurisdiction cases (Texas, Florida) are cited in a California motion with no showing that foreign authority applies. This is a classic hallucination-padding pattern: bulk citations that create an appearance of doctrinal depth but add no legal substance to a California negligence motion.
+Note: Cal.App.4th decisions are not in CourtListener's free index. The citation lookup API was used (which covers Cal.App.4th by normalised reporter) but these cases genuinely return no results. `not_found` with cite_count=0 is the honest answer; the validator returns `unverifiable` for the proposition and states explicitly that the case could not be confirmed in any accessible database.
 
 ---
 
 ## API
 
 ```
-POST /extract     Extract citations + retrieve case texts. Returns for user approval.
+POST /extract     Extract citations + retrieve cases. Returns for user approval.
 POST /analyze     Run full pipeline on approved citations. Returns AnalysisReport JSON.
-POST /rerun       Rerun Validator for one citation with judge's note prepended.
+POST /rerun       Rerun Validator for one citation with judge's note prepended to prompt.
+POST /test-key    Validate Anthropic API key via backend (bypasses WebView2 fetch restrictions).
 GET  /report      Retrieve cached report from last /analyze call.
 GET  /health      Health check.
 ```
-
----
-
-## Known Limitations
-
-- CourtListener coverage is strong for federal courts; California state appellate decisions are well-indexed but some trial court records are not.
-- The Caselaw Access Project (Harvard) provides secondary coverage but full-text retrieval requires parsing the API's HTML response.
-- Google Scholar fallback is not implemented in v0.1 due to rate-limiting constraints.
-- The Privette quote check depends on the retrieved case text containing the verbatim passage at the relevant page.
-- The consistency check sends full document texts to Opus. In production, SUMF assertions would be extracted first and retrieval run per-assertion to reduce token cost.
 
 ---
 
