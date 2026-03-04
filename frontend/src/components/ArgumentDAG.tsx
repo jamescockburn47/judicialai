@@ -27,6 +27,22 @@ const VERDICT_LABELS: Record<string, string> = {
   unverifiable: 'Unverifiable',
 };
 
+// For argument nodes, verdict encodes survival status:
+//   verified   → argument survives (green)
+//   fabricated → argument broken (red)
+//   unverifiable → unknown
+const ARG_STATUS_LABELS: Record<string, string> = {
+  verified: 'Argument intact',
+  fabricated: 'Argument undermined',
+  unverifiable: 'Status unclear',
+};
+
+const ARG_STATUS_COLORS: Record<string, string> = {
+  verified: '#10b981',    // green
+  fabricated: '#ef4444',  // red
+  unverifiable: '#94a3b8', // grey
+};
+
 function buildFlow(graph: ArgumentGraph, selectedId: string | null) {
   // Separate arguments from citations for a top-down hierarchical layout
   const argNodes = graph.nodes.filter((n) => n.node_type === 'argument');
@@ -38,21 +54,32 @@ function buildFlow(graph: ArgumentGraph, selectedId: string | null) {
   const nodeMap = new Map<string, Node>();
 
   argNodes.forEach((n, i) => {
-    const color = '#1e293b';
+    const survivalColor = n.verdict
+      ? (ARG_STATUS_COLORS[n.verdict] ?? '#1e293b')
+      : '#1e293b';
+    const statusLabel = n.verdict ? ARG_STATUS_LABELS[n.verdict] : '';
+
     nodeMap.set(n.id, {
       id: n.id,
       position: { x: i * 240 + 40, y: 40 },
-      data: { label: n.label },
+      data: { label: statusLabel ? `${n.label}\n[${statusLabel}]` : n.label },
       style: {
-        background: color,
+        background: '#1e293b',
         color: '#fff',
-        border: selectedId === n.id ? '2.5px solid #6366f1' : '2px solid #334155',
+        border: selectedId === n.id
+          ? '2.5px solid #6366f1'
+          : `3px solid ${survivalColor}`,
         borderRadius: '8px',
         fontSize: '11px',
         fontWeight: '600',
         maxWidth: 200,
         padding: '10px 12px',
-        boxShadow: selectedId === n.id ? '0 0 0 3px rgba(99,102,241,0.3)' : undefined,
+        whiteSpace: 'pre-wrap' as const,
+        boxShadow: n.verdict === 'fabricated'
+          ? `0 0 8px rgba(239,68,68,0.4)`
+          : selectedId === n.id
+          ? '0 0 0 3px rgba(99,102,241,0.3)'
+          : undefined,
       },
     });
   });
@@ -143,14 +170,23 @@ export function ArgumentDAG({ graph, onNodeClick, selectedId }: Props) {
         <Background color="#e2e8f0" gap={20} />
         <Controls />
 
-        {/* Legend */}
         <Panel position="top-right">
           <div className="bg-white border border-slate-200 rounded-lg shadow-sm px-3 py-2 text-xs space-y-1.5">
             <p className="font-semibold text-slate-700 text-[10px] uppercase tracking-wide mb-1">Legend</p>
+            <p className="text-[9px] text-slate-400 font-medium uppercase tracking-wide">Arguments</p>
             <div className="flex items-center gap-1.5">
-              <div className="w-4 h-4 rounded bg-slate-800 shrink-0" />
-              <span className="text-slate-600">Legal argument</span>
+              <div className="w-4 h-4 rounded bg-slate-800 border-2 border-emerald-500 shrink-0" />
+              <span className="text-slate-600">Argument intact (verified law)</span>
             </div>
+            <div className="flex items-center gap-1.5">
+              <div className="w-4 h-4 rounded bg-slate-800 border-2 border-red-500 shrink-0" />
+              <span className="text-slate-600">Argument undermined (unreliable law)</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <div className="w-4 h-4 rounded bg-slate-800 border-2 border-slate-400 shrink-0" />
+              <span className="text-slate-600">Argument status unclear</span>
+            </div>
+            <p className="text-[9px] text-slate-400 font-medium uppercase tracking-wide pt-1">Citations</p>
             {(['fabricated', 'misused', 'suspect', 'verified', 'unverifiable'] as const).map((v) => (
               <div key={v} className="flex items-center gap-1.5">
                 <div

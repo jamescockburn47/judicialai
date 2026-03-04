@@ -1,23 +1,29 @@
 /// Memo Agent — Opus
-/// Synthesizes findings into a structured judicial report with clear sections.
-/// Written for a judge: neutral, precise, exportable.
+/// Primary purpose: assess the reliability of the brief as a legal document.
+/// Surfaces citation integrity issues first, factual record issues second,
+/// legal analysis last. Written for a judge, not as a case summary.
 use anyhow::Result;
 
 use crate::llm::{LlmClient, MODEL_OPUS};
 use crate::types::{ConsistencyFlag, ConsistencyStatus, ValidationResult, Verdict};
 
-const SYSTEM: &str = r#"You are a senior judicial law clerk drafting a bench memo for a judge who will rule on a motion for summary judgment. Write in a neutral, precise judicial register. Do not predict the outcome. Do not recommend a decision.
+const SYSTEM: &str = r#"You are a senior judicial law clerk. Your task is to assess the reliability of a submitted brief as a legal document and produce a working bench memo for the judge.
 
-You must produce a structured memo with the following clearly labelled sections. Each section should be substantive — this is not a summary, it is a working document for the judge.
+Your PRIMARY concern is citation integrity: does this brief cite law that actually exists, actually says what the brief claims, and actually supports the propositions for which it is cited? Where law cannot be verified using available resources (CourtListener, public databases), you must flag this explicitly — unverifiability is itself a reliability concern, not a clean bill of health.
 
-SECTIONS REQUIRED:
-1. MOTION — What the movant argues and the legal standards invoked
-2. CITATION ANALYSIS — For each flagged citation: what the motion claims, what the case actually holds (or why it appears fabricated), and the significance to the argument
-3. FACTUAL RECORD — Where the SUMF is contradicted or unsupported by the record documents, with specific references
-4. KEY LEGAL QUESTIONS — The 2-3 questions the court must resolve to rule on this motion
-5. PROCEDURAL NOTE — Any procedural issues (timing, jurisdiction, standing) worth flagging
+Structure your memo with these sections in this order:
 
-Format each section with its heading in ALL CAPS followed by a colon. Write in complete sentences. Be specific — cite the case names and SUMF paragraph numbers where relevant."#;
+BRIEF RELIABILITY ASSESSMENT: A direct, plain-English verdict on the overall reliability of the brief's legal citations. How many citations were verified, how many were unverifiable, how many appear fabricated or misused? What is the aggregate effect on the brief's legal foundation? This is the lead section — write it as if you are briefing the judge before argument.
+
+CITATION INTEGRITY: For each problematic citation, state: (1) what the brief claims the case holds; (2) what the case actually holds or why it could not be verified; (3) whether the unresolved citation is structural to the argument or merely decorative; (4) what the judge should know before relying on it.
+
+FACTUAL RECORD ISSUES: Where the Statement of Undisputed Material Facts is contradicted or unsupported by the record documents (police report, medical records, witness statement). Be specific — cite SUMF paragraph numbers and the contradicting document.
+
+EFFECT ON THE BRIEF'S ARGUMENTS: Which of the movant's arguments survive intact if the unreliable citations are disregarded? Which arguments lose their legal foundation? Be direct.
+
+KEY LEGAL QUESTIONS: The 2-3 questions the court must resolve, framed neutrally.
+
+Do not predict the outcome. Do not recommend a decision. Write in complete sentences. Be specific — name cases, paragraph numbers, and documents."#;
 
 pub async fn write_memo(
     llm: &LlmClient,
@@ -25,28 +31,37 @@ pub async fn write_memo(
     validation_results: &[ValidationResult],
     consistency_flags: &[ConsistencyFlag],
 ) -> Result<String> {
-    let flagged: Vec<String> = validation_results
+    // Build a full citation integrity summary
+    let total = validation_results.len();
+    let verified_count = validation_results.iter().filter(|v| matches!(v.verdict, Verdict::Verified)).count();
+    let fabricated: Vec<&ValidationResult> = validation_results.iter().filter(|v| matches!(v.verdict, Verdict::Fabricated)).collect();
+    let misused: Vec<&ValidationResult> = validation_results.iter().filter(|v| matches!(v.verdict, Verdict::Misused)).collect();
+    let suspect: Vec<&ValidationResult> = validation_results.iter().filter(|v| matches!(v.verdict, Verdict::Suspect)).collect();
+    let unverifiable: Vec<&ValidationResult> = validation_results.iter().filter(|v| matches!(v.verdict, Verdict::Unverifiable)).collect();
+
+    let citation_detail: Vec<String> = validation_results
         .iter()
-        .filter(|v| !matches!(v.verdict, Verdict::Verified))
         .map(|v| {
             format!(
-                "Citation: {}\nVerdict: {:?} (confidence: {:?})\nProposition claimed: {}\nReasoning: {}\nFlags: {}",
+                "Citation: {}\nVerdict: {:?} | Confidence: {:?} | Structural: {}\nProposition in brief: {}\nAnalysis: {}\nQuote accurate: {}\nFlags: {}",
                 v.citation_string,
                 v.verdict,
                 v.confidence,
+                v.is_structural,
                 v.proposition,
                 v.reasoning,
-                v.flags.join("; ")
+                v.quote_accurate.map(|b| if b { "Yes" } else { "No — see analysis" }).unwrap_or("N/A"),
+                if v.flags.is_empty() { "None".to_string() } else { v.flags.join("; ") }
             )
         })
         .collect();
 
-    let contradictions: Vec<String> = consistency_flags
+    let consistency_detail: Vec<String> = consistency_flags
         .iter()
         .filter(|f| !matches!(f.status, ConsistencyStatus::Supported))
         .map(|f| {
             format!(
-                "SUMF assertion: {}\nStatus: {:?}\nContradicted by: {}\nDetail: {}",
+                "SUMF assertion: {}\nRecord status: {:?}\nContradicted by: {}\nDetail: {}",
                 f.sumf_assertion,
                 f.status,
                 f.contradicted_by.join(", "),
@@ -56,28 +71,34 @@ pub async fn write_memo(
         .collect();
 
     let user = format!(
-        r#"MOTION TEXT:
-{}
+        r#"MOTION TEXT (first 2500 chars):
+{motion}
 
-CITATION ISSUES IDENTIFIED BY PIPELINE:
-{}
+CITATION INTEGRITY SUMMARY:
+Total citations: {total}
+Verified: {verified} | Fabricated: {fab} | Misused: {mis} | Suspect: {sus} | Unverifiable (not found in public databases): {unver}
 
-FACTUAL RECORD ISSUES:
-{}
+DETAILED CITATION ANALYSIS:
+{citations}
 
-Draft a structured bench memo covering all required sections."#,
-        &msj_text[..msj_text.len().min(3000)],
-        if flagged.is_empty() {
-            "No citation issues identified.".to_string()
-        } else {
-            flagged.join("\n\n---\n\n")
-        },
-        if contradictions.is_empty() {
+FACTUAL RECORD ISSUES (SUMF vs. record documents):
+{consistency}
+
+Draft the bench memo following the required structure."#,
+        motion = &msj_text[..msj_text.len().min(2500)],
+        total = total,
+        verified = verified_count,
+        fab = fabricated.len(),
+        mis = misused.len(),
+        sus = suspect.len(),
+        unver = unverifiable.len(),
+        citations = citation_detail.join("\n\n---\n\n"),
+        consistency = if consistency_detail.is_empty() {
             "No factual contradictions identified.".to_string()
         } else {
-            contradictions.join("\n\n---\n\n")
+            consistency_detail.join("\n\n---\n\n")
         }
     );
 
-    llm.call(MODEL_OPUS, SYSTEM, &user, 2500).await
+    llm.call(MODEL_OPUS, SYSTEM, &user, 3000).await
 }
