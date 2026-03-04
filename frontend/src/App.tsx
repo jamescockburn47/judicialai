@@ -210,7 +210,7 @@ export default function App() {
   const [showKeySettings, setShowKeySettings] = useState(false);
   const [hasApiKey, setHasApiKey] = useState(false);
   const [activeDocFilename, setActiveDocFilename] = useState<string>('');
-  const [activeResultTab, setActiveResultTab] = useState<'checklist' | 'dag'>('checklist');
+  const [activeResultTab, setActiveResultTab] = useState<'memo' | 'checklist' | 'dag'>('memo');
 
   useEffect(() => {
     listMatters().then(setMatters).catch(console.error);
@@ -286,7 +286,7 @@ export default function App() {
       setReport(result);
       await saveAnalysisCache(matter, mode, result);
       setStage('review');
-      setActiveResultTab('checklist');
+      setActiveResultTab('memo');
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Analysis failed');
       setStage('approval');
@@ -424,10 +424,7 @@ export default function App() {
               )}
             </div>
 
-            {/* Bench memo banner — structured sections, collapsible, exportable */}
-            {report?.judicial_memo && (
-              <MemoPanel memo={report.judicial_memo} matterId={activeMatter?.id ?? 'report'} />
-            )}
+            {/* Bench memo now lives as full tab in review mode — no banner strip needed */}
 
             {/* Main split */}
             <div className="flex-1 flex overflow-hidden">
@@ -519,6 +516,16 @@ export default function App() {
                     {/* Result tabs */}
                     <div className="flex border-b border-slate-200 bg-white px-4 shrink-0">
                       <button
+                        onClick={() => setActiveResultTab('memo')}
+                        className={`px-4 py-2.5 text-xs font-medium border-b-2 transition-colors ${
+                          activeResultTab === 'memo'
+                            ? 'border-indigo-600 text-indigo-600'
+                            : 'border-transparent text-slate-500 hover:text-slate-700'
+                        }`}
+                      >
+                        Bench Memo
+                      </button>
+                      <button
                         onClick={() => setActiveResultTab('checklist')}
                         className={`px-4 py-2.5 text-xs font-medium border-b-2 transition-colors ${
                           activeResultTab === 'checklist'
@@ -526,7 +533,7 @@ export default function App() {
                             : 'border-transparent text-slate-500 hover:text-slate-700'
                         }`}
                       >
-                        Resolution Checklist
+                        Citation Review
                         <span className="ml-1.5 text-[10px] bg-slate-100 text-slate-500 rounded px-1.5 py-0.5">
                           {report.checklist.length}
                         </span>
@@ -542,7 +549,7 @@ export default function App() {
                         Argument Map
                       </button>
                       <div className="flex-1" />
-                      {/* Verdict summary */}
+                      {/* Verdict summary pills */}
                       <div className="flex items-center gap-1.5 text-[10px] py-2">
                         {(['fabricated', 'misused', 'suspect', 'verified', 'unverifiable'] as const).map((v) => {
                           const count = report.validation_results.filter((r) => r.verdict === v).length;
@@ -552,25 +559,97 @@ export default function App() {
                       </div>
                     </div>
 
-                    {activeResultTab === 'checklist' && (
-                      <div className="flex-1 overflow-y-auto p-4">
-                        <ResolutionChecklist
-                          report={report}
-                          checklist={checklist}
-                          onUpdate={updateChecklistItem}
-                          onRerun={async (itemId, note) => {
-                            const result = await rerunCitation(itemId, note);
-                            setReport({
-                              ...report,
-                              validation_results: report.validation_results.map((v) =>
-                                v.citation_id === itemId ? result.updated_result : v,
-                              ),
-                            });
-                          }}
-                        />
+                    {/* Memo: full page with MSJ alongside */}
+                    {activeResultTab === 'memo' && (
+                      <div className="flex-1 overflow-hidden flex">
+                        {/* MSJ on the left for reference */}
+                        <div className="w-[40%] shrink-0 border-r border-slate-200 overflow-hidden">
+                          <DocumentViewer
+                            matter={activeMatter}
+                            filename={activeMatter.primaryDocument}
+                            citationStrings={citationHighlights}
+                            canExtract={false}
+                            extracting={false}
+                            onExtract={() => {}}
+                          />
+                        </div>
+                        {/* Memo on the right */}
+                        <div className="flex-1 overflow-y-auto bg-white">
+                          <div className="max-w-2xl mx-auto px-8 py-6">
+                            <div className="flex items-center justify-between mb-4">
+                              <h2 className="text-base font-semibold text-slate-900">Bench Memo</h2>
+                              <button
+                                onClick={() => {
+                                  const blob = new Blob([report.judicial_memo], { type: 'text/plain' });
+                                  const url = URL.createObjectURL(blob);
+                                  const a = document.createElement('a');
+                                  a.href = url;
+                                  a.download = `bench-memo-${activeMatter.id}.txt`;
+                                  a.click();
+                                  URL.revokeObjectURL(url);
+                                }}
+                                className="text-xs text-indigo-600 hover:underline border border-indigo-200 px-3 py-1 rounded"
+                              >
+                                Export .txt
+                              </button>
+                            </div>
+                            <div className="text-sm text-slate-700 leading-relaxed space-y-1">
+                              {report.judicial_memo.split('\n').map((line, i) => {
+                                const trimmed = line.trim();
+                                if (!trimmed) return <div key={i} className="h-3" />;
+                                if (/^[A-Z][A-Z\s]{2,}:/.test(trimmed)) {
+                                  return (
+                                    <h3 key={i} className="text-sm font-bold text-slate-900 mt-5 mb-1 border-b border-slate-200 pb-1">
+                                      {trimmed}
+                                    </h3>
+                                  );
+                                }
+                                return <p key={i}>{trimmed}</p>;
+                              })}
+                            </div>
+                          </div>
+                        </div>
                       </div>
                     )}
 
+                    {/* Citation Review: checklist + inline case text panel */}
+                    {activeResultTab === 'checklist' && (
+                      <div className="flex-1 overflow-hidden flex">
+                        {/* MSJ on the left */}
+                        <div className="w-[40%] shrink-0 border-r border-slate-200 overflow-hidden">
+                          <DocumentViewer
+                            matter={activeMatter}
+                            filename={activeDocFilename}
+                            citationStrings={citationHighlights}
+                            canExtract={false}
+                            extracting={false}
+                            onExtract={() => {}}
+                          />
+                        </div>
+                        {/* Checklist on the right */}
+                        <div className="flex-1 overflow-y-auto p-4">
+                          <p className="text-xs text-slate-500 mb-3">
+                            Review each citation. Accept, flag, or add a note and rerun. Export the full audit trail when done.
+                          </p>
+                          <ResolutionChecklist
+                            report={report}
+                            checklist={checklist}
+                            onUpdate={updateChecklistItem}
+                            onRerun={async (itemId, note) => {
+                              const result = await rerunCitation(itemId, note);
+                              setReport({
+                                ...report,
+                                validation_results: report.validation_results.map((v) =>
+                                  v.citation_id === itemId ? result.updated_result : v,
+                                ),
+                              });
+                            }}
+                          />
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Argument Map: full width */}
                     {activeResultTab === 'dag' && (
                       <div className="flex-1 overflow-hidden grid grid-cols-[1fr_320px]">
                         <ArgumentDAG
