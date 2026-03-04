@@ -6,53 +6,198 @@ interface Props {
   report: AnalysisReport;
   checklist: ChecklistItem[];
   retrievedCases: RetrievedCase[];
+  selectedCitationId: string | null;
+  onSelectCitation: (id: string | null) => void;
   onViewCaseText: (citationId: string) => void;
   onUpdate: (id: string, update: Partial<ChecklistItem>) => void;
   onRerun: (itemId: string, note: string) => Promise<void>;
+  onExport: () => void;
 }
 
-function CitationDetail({ result }: { result: ValidationResult }) {
-  const [showText, setShowText] = useState(false);
+// ── Compact citation row (single line) ────────────────────────────────────────
+
+function CitationRow({
+  item,
+  validationResult,
+  retrieved,
+  isSelected,
+  onSelect,
+  onViewCaseText,
+  onAccept,
+  onFlag,
+}: {
+  item: ChecklistItem;
+  validationResult: ValidationResult | undefined;
+  retrieved: RetrievedCase | undefined;
+  isSelected: boolean;
+  onSelect: () => void;
+  onViewCaseText: () => void;
+  onAccept: () => void;
+  onFlag: () => void;
+}) {
+  const hasText = !!retrieved?.full_text && retrieved.full_text.length > 200;
+  const isFabricated = retrieved?.cite_count === 0;
+
+  const statusBg =
+    item.status === 'accepted' ? 'bg-emerald-50 border-emerald-200' :
+    item.status === 'flagged'  ? 'bg-red-50 border-red-200' :
+    isSelected                 ? 'bg-indigo-50 border-indigo-300' :
+                                 'bg-white border-slate-200 hover:border-slate-300';
 
   return (
-    <div className="mt-2 text-xs text-slate-600 space-y-1.5 border-t border-slate-100 pt-2">
-      <div>
-        <span className="text-slate-400 uppercase tracking-wide text-[10px] font-medium">Proposition in brief: </span>
-        <span>{result.proposition}</span>
+    <div
+      className={`border rounded flex items-center gap-1.5 px-2 py-1.5 cursor-pointer text-[10px] ${statusBg}`}
+      onClick={onSelect}
+    >
+      {/* Verdict badge */}
+      {item.verdict && <VerdictBadge verdict={item.verdict} />}
+
+      {/* Citation label — truncated */}
+      <span className="flex-1 min-w-0 truncate text-slate-800 font-mono" title={item.label}>
+        {item.label}
+      </span>
+
+      {/* Signals */}
+      {isFabricated && <span className="text-red-600 font-bold shrink-0" title="0 citations in graph — fabrication signal">⚠</span>}
+      {item.rerun_count > 0 && <span className="text-indigo-500 shrink-0">↻{item.rerun_count}</span>}
+
+      {/* View case text */}
+      <button
+        onClick={(e) => { e.stopPropagation(); onViewCaseText(); }}
+        className={`shrink-0 rounded px-1 py-0.5 ${hasText ? 'text-indigo-500 hover:bg-indigo-100' : 'text-slate-300'}`}
+        title={hasText ? 'View case text' : 'No case text available'}
+        disabled={!hasText}
+      >
+        ⬚
+      </button>
+
+      {/* Accept / Flag icon buttons */}
+      {item.status !== 'accepted' ? (
+        <button
+          onClick={(e) => { e.stopPropagation(); onAccept(); }}
+          className="shrink-0 text-emerald-600 hover:bg-emerald-100 rounded px-1 py-0.5"
+          title="Accept"
+        >✓</button>
+      ) : (
+        <button
+          onClick={(e) => { e.stopPropagation(); onAccept(); }}
+          className="shrink-0 text-slate-400 hover:bg-slate-100 rounded px-1 py-0.5 text-[9px]"
+          title="Undo accept"
+        >✓</button>
+      )}
+      <button
+        onClick={(e) => { e.stopPropagation(); onFlag(); }}
+        className={`shrink-0 rounded px-1 py-0.5 ${item.status === 'flagged' ? 'text-red-600 bg-red-100' : 'text-amber-500 hover:bg-amber-100'}`}
+        title="Flag"
+      >⚑</button>
+    </div>
+  );
+}
+
+// ── Selected citation detail pane ─────────────────────────────────────────────
+
+function CitationDetail({
+  item,
+  result,
+  note,
+  rerunning,
+  onNoteChange,
+  onRerun,
+  onClose,
+}: {
+  item: ChecklistItem;
+  result: ValidationResult | undefined;
+  note: string;
+  rerunning: boolean;
+  onNoteChange: (v: string) => void;
+  onRerun: () => void;
+  onClose: () => void;
+}) {
+  if (!result) return null;
+
+  return (
+    <div className="border border-indigo-200 rounded bg-indigo-50 p-2.5 text-[10px] space-y-1.5">
+      <div className="flex items-start justify-between gap-1">
+        <p className="font-mono text-slate-700 text-[9px] truncate flex-1">{item.label}</p>
+        <button onClick={onClose} className="text-slate-400 hover:text-slate-600 shrink-0 ml-1">×</button>
       </div>
+
       <div>
-        <span className="text-slate-400 uppercase tracking-wide text-[10px] font-medium">Analysis: </span>
-        <span>{result.reasoning}</span>
+        <span className="text-slate-400 font-medium">Proposition: </span>
+        <span className="text-slate-700">{result.proposition}</span>
       </div>
+
+      <div>
+        <span className="text-slate-400 font-medium">Analysis: </span>
+        <span className="text-slate-700">{result.reasoning}</span>
+      </div>
+
       {result.quote_analysis && (
-        <div>
-          <span className={`text-[10px] font-medium uppercase tracking-wide ${result.quote_accurate === false ? 'text-red-600' : 'text-slate-400'}`}>
-            Quote: {result.quote_accurate === false ? 'INACCURATE — ' : ''}
-          </span>
-          <span className={result.quote_accurate === false ? 'text-red-700' : ''}>{result.quote_analysis}</span>
+        <div className={result.quote_accurate === false ? 'text-red-700' : 'text-slate-700'}>
+          <span className="font-medium">{result.quote_accurate === false ? '⚠ Quote inaccurate: ' : 'Quote: '}</span>
+          {result.quote_analysis}
         </div>
       )}
+
       {result.flags.length > 0 && (
         <div className="flex flex-wrap gap-1">
           {result.flags.map((f, i) => (
-            <span key={i} className="bg-amber-50 text-amber-700 border border-amber-200 rounded px-1.5 py-0.5 text-[10px]">
-              {f}
-            </span>
+            <span key={i} className="bg-amber-100 text-amber-700 rounded px-1 py-0.5">{f}</span>
           ))}
+        </div>
+      )}
+
+      {/* Rerun */}
+      {item.status !== 'accepted' && (
+        <div className="flex gap-1 pt-1 border-t border-indigo-200">
+          <input
+            type="text"
+            placeholder="Note for rerun (e.g. check Hooker exception)..."
+            value={note}
+            onChange={(e) => onNoteChange(e.target.value)}
+            className="flex-1 text-[10px] border border-slate-200 rounded px-1.5 py-1 focus:outline-none focus:ring-1 focus:ring-indigo-400 bg-white"
+          />
+          <button
+            onClick={onRerun}
+            disabled={rerunning || !note.trim()}
+            className="shrink-0 px-2 py-1 text-[10px] bg-indigo-600 text-white rounded hover:bg-indigo-700 disabled:opacity-50"
+          >
+            {rerunning ? '...' : 'Rerun'}
+          </button>
         </div>
       )}
     </div>
   );
 }
 
-export function ResolutionChecklist({ report, checklist, retrievedCases, onViewCaseText, onUpdate, onRerun }: Props) {
+// ── Main component ────────────────────────────────────────────────────────────
+
+export function ResolutionChecklist({
+  report, checklist, retrievedCases, selectedCitationId,
+  onSelectCitation, onViewCaseText, onUpdate, onRerun, onExport,
+}: Props) {
   const [notes, setNotes] = useState<Record<string, string>>({});
   const [rerunning, setRerunning] = useState<Record<string, boolean>>({});
-  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const [flagging, setFlagging] = useState<string | null>(null);
 
-  const handleAccept = (item: ChecklistItem) => onUpdate(item.id, { status: 'accepted' });
-  const handleFlag = (item: ChecklistItem) =>
-    onUpdate(item.id, { status: 'flagged', judge_note: notes[item.id] ?? null });
+  const handleAccept = (item: ChecklistItem) => {
+    if (item.status === 'accepted') {
+      onUpdate(item.id, { status: 'pending' });
+    } else {
+      onUpdate(item.id, { status: 'accepted' });
+      if (selectedCitationId === item.id) onSelectCitation(null);
+    }
+  };
+
+  const handleFlag = (item: ChecklistItem) => {
+    if (flagging === item.id) {
+      onUpdate(item.id, { status: 'flagged', judge_note: notes[item.id] ?? null });
+      setFlagging(null);
+    } else {
+      setFlagging(item.id);
+      onSelectCitation(item.id);
+    }
+  };
 
   const handleRerun = async (item: ChecklistItem) => {
     const note = notes[item.id];
@@ -69,219 +214,116 @@ export function ResolutionChecklist({ report, checklist, retrievedCases, onViewC
     }
   };
 
-  const handleExport = () => {
-    const audit = {
-      case_name: report.case_name,
-      exported_at: new Date().toISOString(),
-      validation_results: report.validation_results,
-      consistency_flags: report.consistency_flags,
-      judicial_memo: report.judicial_memo,
-      checklist_decisions: checklist,
-    };
-    const blob = new Blob([JSON.stringify(audit, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `jr-audit-${Date.now()}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
-  };
-
+  const citationItems = checklist.filter((i) => i.item_type === 'citation');
+  const consistencyItems = checklist.filter((i) => i.item_type === 'consistency_flag');
   const accepted = checklist.filter((i) => i.status === 'accepted').length;
   const flagged = checklist.filter((i) => i.status === 'flagged').length;
 
-  // Group: citations first, then consistency flags
-  const citationItems = checklist.filter((i) => i.item_type === 'citation');
-  const consistencyItems = checklist.filter((i) => i.item_type === 'consistency_flag');
-
   return (
-    <div className="flex flex-col gap-3">
-      {/* Summary + export */}
-      <div className="flex items-center justify-between sticky top-0 bg-slate-50 py-1 z-10">
-        <div className="text-xs text-slate-500">
-          {accepted} accepted · {flagged} flagged · {checklist.length - accepted - flagged} pending
-        </div>
+    <div className="flex flex-col h-full overflow-hidden">
+      {/* Header */}
+      <div className="flex items-center justify-between px-2 py-1.5 border-b border-slate-200 shrink-0 bg-white">
+        <span className="text-[10px] text-slate-400">
+          {accepted}✓ · {flagged}⚑ · {checklist.length - accepted - flagged} pending
+        </span>
         <button
-          onClick={handleExport}
-          className="px-3 py-1.5 text-xs bg-slate-700 text-white rounded hover:bg-slate-800"
+          onClick={onExport}
+          className="text-[10px] text-slate-500 hover:text-slate-800 border border-slate-200 rounded px-2 py-0.5 hover:border-slate-400"
         >
-          Export Audit Trail
+          Export
         </button>
       </div>
 
-      {/* Citation verdicts */}
-      <div>
-        <p className="text-[10px] text-slate-400 font-medium uppercase tracking-wide mb-2">
-          Citations ({citationItems.length})
-        </p>
-          <div className="flex flex-col gap-2">
-          {citationItems.map((item) => {
-            const validationResult = report.validation_results.find(
-              (v) => v.citation_id === item.id || v.citation_string === item.label,
-            );
-            const retrieved = retrievedCases.find((r) => r.citation_id === item.id);
-            const hasText = retrieved?.full_text && retrieved.full_text.length > 200;
-            const isExpanded = expanded[item.id];
+      {/* Scrollable list */}
+      <div className="flex-1 overflow-y-auto px-2 py-2 space-y-1">
 
-            return (
-              <div
-                key={item.id}
-                className={`border rounded-lg ${
-                  item.status === 'accepted' ? 'border-emerald-200 bg-emerald-50'
-                    : item.status === 'flagged' ? 'border-red-200 bg-red-50'
-                    : 'border-slate-200 bg-white'
-                }`}
-              >
-                {/* Header row */}
-                <div className="flex items-start gap-2 p-3">
-                  <button
-                    onClick={() => setExpanded((e) => ({ ...e, [item.id]: !e[item.id] }))}
-                    className="mt-0.5 text-slate-400 hover:text-slate-700 shrink-0 text-xs"
-                  >
-                    {isExpanded ? '▼' : '▶'}
-                  </button>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      {item.verdict && <VerdictBadge verdict={item.verdict} />}
-                      {item.confidence && (
-                        <span className="text-[10px] text-slate-500">{item.confidence} conf.</span>
-                      )}
-                      {item.rerun_count > 0 && (
-                        <span className="text-[10px] text-indigo-600">↻ {item.rerun_count}×</span>
-                      )}
-                      {/* View case text button */}
-                      <button
-                        onClick={() => onViewCaseText(item.id)}
-                        className={`text-[10px] rounded px-1.5 py-0.5 border transition-colors ${
-                          hasText
-                            ? 'border-indigo-200 text-indigo-600 hover:bg-indigo-50'
-                            : 'border-slate-200 text-slate-400 hover:border-slate-300'
-                        }`}
-                        title={hasText ? 'View retrieved case text' : 'Case text not available'}
-                      >
-                        {hasText ? 'View case text →' : 'No case text'}
-                      </button>
-                      {retrieved?.cite_count === 0 && (
-                        <span className="text-[10px] bg-red-100 text-red-700 rounded px-1.5 py-0.5">
-                          ⚠ 0 citations in graph
-                        </span>
-                      )}
-                    </div>
-                    <p className="mt-0.5 text-xs text-slate-800 font-mono break-words">{item.label}</p>
-                    {item.judge_note && (
-                      <p className="mt-0.5 text-[10px] text-slate-500 italic">Note: {item.judge_note}</p>
-                    )}
-
-                    {/* Inline detail when expanded */}
-                    {isExpanded && validationResult && (
-                      <CitationDetail result={validationResult} />
-                    )}
-
-                    {/* Note input */}
-                    {item.status !== 'accepted' && (
-                      <input
-                        type="text"
-                        placeholder="Note for flagging or rerun..."
-                        value={notes[item.id] ?? ''}
-                        onChange={(e) => setNotes({ ...notes, [item.id]: e.target.value })}
-                        className="mt-2 w-full text-[10px] border border-slate-200 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-indigo-400"
-                      />
-                    )}
-                  </div>
-
-                  {/* Action buttons */}
-                  <div className="flex flex-col gap-1 shrink-0">
-                    {item.status !== 'accepted' && (
-                      <button
-                        onClick={() => handleAccept(item)}
-                        className="px-2.5 py-1 text-[10px] bg-emerald-600 text-white rounded hover:bg-emerald-700"
-                      >
-                        Accept
-                      </button>
-                    )}
-                    {item.status !== 'flagged' && (
-                      <button
-                        onClick={() => handleFlag(item)}
-                        className="px-2.5 py-1 text-[10px] bg-amber-500 text-white rounded hover:bg-amber-600"
-                      >
-                        Flag
-                      </button>
-                    )}
-                    {item.item_type === 'citation' && (
-                      <button
-                        onClick={() => handleRerun(item)}
-                        disabled={rerunning[item.id] || !notes[item.id]?.trim()}
-                        className="px-2.5 py-1 text-[10px] bg-indigo-600 text-white rounded hover:bg-indigo-700 disabled:opacity-50"
-                      >
-                        {rerunning[item.id] ? '...' : 'Rerun'}
-                      </button>
-                    )}
-                    {item.status === 'accepted' && (
-                      <button
-                        onClick={() => onUpdate(item.id, { status: 'pending' })}
-                        className="px-2.5 py-1 text-[10px] bg-slate-200 text-slate-600 rounded hover:bg-slate-300"
-                      >
-                        Undo
-                      </button>
-                    )}
-                  </div>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* Consistency flags */}
-      {consistencyItems.length > 0 && (
-        <div className="mt-2">
-          <p className="text-[10px] text-slate-400 font-medium uppercase tracking-wide mb-2">
-            Factual Record Issues ({consistencyItems.length})
+        {/* Citations */}
+        {citationItems.length > 0 && (
+          <p className="text-[9px] text-slate-400 uppercase tracking-widest font-medium pt-1 pb-0.5">
+            Citations
           </p>
-          <div className="flex flex-col gap-2">
+        )}
+        {citationItems.map((item) => {
+          const vr = report.validation_results.find(
+            (v) => v.citation_id === item.id || v.citation_string === item.label,
+          );
+          const rc = retrievedCases.find((r) => r.citation_id === item.id);
+          const isSelected = selectedCitationId === item.id;
+
+          return (
+            <div key={item.id}>
+              <CitationRow
+                item={item}
+                validationResult={vr}
+                retrieved={rc}
+                isSelected={isSelected}
+                onSelect={() => onSelectCitation(isSelected ? null : item.id)}
+                onViewCaseText={() => onViewCaseText(item.id)}
+                onAccept={() => handleAccept(item)}
+                onFlag={() => handleFlag(item)}
+              />
+              {isSelected && vr && (
+                <CitationDetail
+                  item={item}
+                  result={vr}
+                  note={notes[item.id] ?? ''}
+                  rerunning={rerunning[item.id] ?? false}
+                  onNoteChange={(v) => setNotes({ ...notes, [item.id]: v })}
+                  onRerun={() => handleRerun(item)}
+                  onClose={() => onSelectCitation(null)}
+                />
+              )}
+            </div>
+          );
+        })}
+
+        {/* Consistency flags */}
+        {consistencyItems.length > 0 && (
+          <>
+            <p className="text-[9px] text-slate-400 uppercase tracking-widest font-medium pt-2 pb-0.5">
+              Factual Contradictions
+            </p>
             {consistencyItems.map((item) => {
               const flag = report.consistency_flags.find((f) => f.id === item.id);
+              const isSelected = selectedCitationId === item.id;
 
               return (
-                <div
-                  key={item.id}
-                  className={`border rounded-lg p-3 ${
-                    item.status === 'accepted' ? 'border-emerald-200 bg-emerald-50'
-                      : item.status === 'flagged' ? 'border-red-200 bg-red-50'
-                      : 'border-slate-200 bg-white'
-                  }`}
-                >
-                  <div className="flex items-start gap-2">
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <span className={`text-[10px] font-medium rounded px-1.5 py-0.5 ${
-                          flag?.status === 'contradicted' ? 'bg-red-100 text-red-700'
-                            : flag?.status === 'unsupported' ? 'bg-amber-100 text-amber-700'
-                            : 'bg-slate-100 text-slate-600'
-                        }`}>
-                          {flag?.status ?? 'unknown'}
-                        </span>
-                      </div>
-                      <p className="mt-1 text-xs text-slate-800 break-words">{item.label}</p>
-                      {flag?.detail && (
-                        <p className="mt-1 text-[10px] text-slate-600 leading-relaxed">{flag.detail}</p>
-                      )}
-                    </div>
-                    <div className="flex flex-col gap-1 shrink-0">
-                      {item.status !== 'accepted' && (
-                        <button onClick={() => handleAccept(item)} className="px-2.5 py-1 text-[10px] bg-emerald-600 text-white rounded hover:bg-emerald-700">Accept</button>
-                      )}
-                      {item.status !== 'flagged' && (
-                        <button onClick={() => handleFlag(item)} className="px-2.5 py-1 text-[10px] bg-amber-500 text-white rounded hover:bg-amber-600">Flag</button>
-                      )}
-                    </div>
+                <div key={item.id}>
+                  <div
+                    className={`border rounded flex items-center gap-1.5 px-2 py-1.5 cursor-pointer text-[10px] ${
+                      item.status === 'accepted' ? 'bg-emerald-50 border-emerald-200' :
+                      item.status === 'flagged'  ? 'bg-red-50 border-red-200' :
+                      isSelected                 ? 'bg-indigo-50 border-indigo-300' :
+                                                   'bg-white border-slate-200 hover:border-slate-300'
+                    }`}
+                    onClick={() => onSelectCitation(isSelected ? null : item.id)}
+                  >
+                    <span className={`shrink-0 text-[9px] font-bold rounded px-1 py-0.5 ${
+                      flag?.status === 'contradicted' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'
+                    }`}>
+                      {flag?.status === 'contradicted' ? 'CONTRA' : 'PARTIAL'}
+                    </span>
+                    <span className="flex-1 min-w-0 truncate text-slate-700" title={item.label}>{item.label}</span>
+                    {item.status !== 'accepted' && (
+                      <button onClick={(e) => { e.stopPropagation(); handleAccept(item); }}
+                        className="shrink-0 text-emerald-600 hover:bg-emerald-100 rounded px-1 py-0.5">✓</button>
+                    )}
+                    <button onClick={(e) => { e.stopPropagation(); handleFlag(item); }}
+                      className={`shrink-0 rounded px-1 py-0.5 ${item.status === 'flagged' ? 'text-red-600 bg-red-100' : 'text-amber-500 hover:bg-amber-100'}`}>⚑</button>
                   </div>
+                  {isSelected && flag?.detail && (
+                    <div className="border border-indigo-200 rounded bg-indigo-50 px-2.5 py-1.5 text-[10px] text-slate-700 space-y-1">
+                      <p className="font-medium text-slate-900">{item.label}</p>
+                      <p className="leading-relaxed">{flag.detail}</p>
+                      <button onClick={() => onSelectCitation(null)} className="text-slate-400 hover:text-slate-600">Close ×</button>
+                    </div>
+                  )}
                 </div>
               );
             })}
-          </div>
-        </div>
-      )}
+          </>
+        )}
+      </div>
     </div>
   );
 }

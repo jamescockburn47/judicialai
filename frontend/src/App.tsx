@@ -375,6 +375,7 @@ export default function App() {
   const [activeResultTab, setActiveResultTab] = useState<'memo' | 'checklist' | 'dag'>('memo');
   // Left panel: 'msj' | 'doc:<filename>' | 'case:<citation_id>'
   const [leftPanel, setLeftPanel] = useState<string>('msj');
+  const [selectedCitationId, setSelectedCitationId] = useState<string | null>(null);
 
   useEffect(() => {
     listMatters().then(setMatters).catch(console.error);
@@ -787,8 +788,8 @@ export default function App() {
                     {/* Citation Review: three-panel — MSJ | case text | checklist */}
                     {activeResultTab === 'checklist' && (
                       <div className="flex-1 overflow-hidden flex">
-                        {/* Panel 1: MSJ with citation highlights */}
-                        <div className="w-[30%] shrink-0 border-r border-slate-200 overflow-hidden">
+                        {/* Panel 1: MSJ (40%) */}
+                        <div className="w-[40%] shrink-0 border-r border-slate-200 overflow-hidden">
                           <DocumentViewer
                             matter={activeMatter}
                             filename={activeMatter.primaryDocument}
@@ -799,8 +800,8 @@ export default function App() {
                           />
                         </div>
 
-                        {/* Panel 2: Retrieved case text (changes when you click a citation) */}
-                        <div className="w-[30%] shrink-0 border-r border-slate-200 overflow-hidden">
+                        {/* Panel 2: Retrieved case text (40%) */}
+                        <div className="w-[40%] shrink-0 border-r border-slate-200 overflow-hidden">
                           {leftPanel === 'msj' ? (
                             <div className="flex flex-col h-full">
                               <div className="px-4 py-3 border-b border-slate-200 bg-slate-50 shrink-0">
@@ -824,15 +825,14 @@ export default function App() {
                           ) : null}
                         </div>
 
-                        {/* Panel 3: Citation checklist */}
-                        <div className="flex-1 overflow-y-auto p-3">
-                          <p className="text-xs text-slate-500 mb-2">
-                            Click <strong>View case text</strong> to load the retrieved opinion into the centre panel alongside the MSJ.
-                          </p>
+                        {/* Panel 3: Compact citation checklist (20%) */}
+                        <div className="flex-1 overflow-hidden flex flex-col">
                           <ResolutionChecklist
                             report={report}
                             checklist={checklist}
                             retrievedCases={retrievedCases}
+                            selectedCitationId={selectedCitationId}
+                            onSelectCitation={setSelectedCitationId}
                             onViewCaseText={(citId) => setLeftPanel(`case:${citId}`)}
                             onUpdate={updateChecklistItem}
                             onRerun={async (itemId, note) => {
@@ -843,6 +843,23 @@ export default function App() {
                                   v.citation_id === itemId ? result.updated_result : v,
                                 ),
                               });
+                            }}
+                            onExport={() => {
+                              const audit = {
+                                case_name: report.case_name,
+                                exported_at: new Date().toISOString(),
+                                validation_results: report.validation_results,
+                                consistency_flags: report.consistency_flags,
+                                judicial_memo: report.judicial_memo,
+                                checklist_decisions: checklist,
+                              };
+                              const blob = new Blob([JSON.stringify(audit, null, 2)], { type: 'application/json' });
+                              const url = URL.createObjectURL(blob);
+                              const a = document.createElement('a');
+                              a.href = url;
+                              a.download = `jr-audit-${activeMatter?.id ?? 'report'}-${Date.now()}.json`;
+                              a.click();
+                              URL.revokeObjectURL(url);
                             }}
                           />
                         </div>
