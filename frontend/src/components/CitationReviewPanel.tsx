@@ -40,7 +40,7 @@ function CaseTextView({
   onBack: () => void;
 }) {
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col flex-1 min-h-0">
       <div className="flex items-center gap-2 px-4 py-3 border-b border-slate-200 bg-white shrink-0">
         <button
           onClick={onBack}
@@ -168,12 +168,15 @@ export function CitationReviewPanel({
     const citation = citations.find((c) => c.id === viewingCase);
     const retrieved = getRetrieved(viewingCase);
     if (!citation) return null;
+    // Wrap in flex-1 min-h-0 so CaseTextView fills the parent flex column
     return (
-      <CaseTextView
-        citation={citation}
-        retrieved={retrieved}
-        onBack={() => setViewingCase(null)}
-      />
+      <div className="flex flex-col flex-1 min-h-0">
+        <CaseTextView
+          citation={citation}
+          retrieved={retrieved}
+          onBack={() => setViewingCase(null)}
+        />
+      </div>
     );
   }
 
@@ -181,7 +184,7 @@ export function CitationReviewPanel({
   const unresolvable = retrievedCases.filter((r) => r.status === 'unresolvable' || r.status === 'not_found' || r.status === 'not_indexed').length;
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col flex-1 min-h-0">
       {/* Header: mode + run button */}
       <div className="px-4 py-3 bg-white border-b border-slate-200 shrink-0">
         <div className="flex items-center justify-between gap-3 flex-wrap">

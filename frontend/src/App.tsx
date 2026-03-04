@@ -663,18 +663,20 @@ export default function App() {
 
                 {/* APPROVAL: citation review panel */}
                 {stage === 'approval' && (
-                  <CitationReviewPanel
-                    citations={citations}
-                    retrievedCases={retrievedCases}
-                    approvedCitations={approvedCitations}
-                    mode={mode}
-                    onModeChange={handleModeChange}
-                    onApproveCitation={approveCitation}
-                    onRejectCitation={rejectCitation}
-                    onApproveAll={approveAll}
-                    onRunAnalysis={() => runAnalysis(activeMatter)}
-                    running={running}
-                  />
+                  <div className="flex-1 overflow-hidden flex flex-col">
+                    <CitationReviewPanel
+                      citations={citations}
+                      retrievedCases={retrievedCases}
+                      approvedCitations={approvedCitations}
+                      mode={mode}
+                      onModeChange={handleModeChange}
+                      onApproveCitation={approveCitation}
+                      onRejectCitation={rejectCitation}
+                      onApproveAll={approveAll}
+                      onRunAnalysis={() => runAnalysis(activeMatter)}
+                      running={running}
+                    />
+                  </div>
                 )}
 
                 {/* ANALYZING spinner */}
