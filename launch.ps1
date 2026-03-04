@@ -203,7 +203,11 @@ $tauriLines += '$env:PATH = $env:PATH'
 $tauriLines += [string]::Format('Set-Location ''{0}''', $FrontendDir)
 $tauriLines += "if (-not (Test-Path 'node_modules')) {"
 $tauriLines += "    Write-Host 'Installing npm packages (first run only)...'"
-$tauriLines += "    npm install"
+$tauriLines += "    npm install --prefer-offline --no-audit --no-fund"
+$tauriLines += "    if (`$LASTEXITCODE -ne 0) {"
+$tauriLines += "        Write-Host 'npm install failed. Trying with --legacy-peer-deps...'"
+$tauriLines += "        npm install --legacy-peer-deps --prefer-offline --no-audit --no-fund"
+$tauriLines += "    }"
 $tauriLines += "}"
 $tauriLines += '$env:VITE_API_URL = ''http://localhost:8002'''
 $tauriLines += "Write-Host 'Building Tauri app (first run ~5-10 min, then fast)...'"
