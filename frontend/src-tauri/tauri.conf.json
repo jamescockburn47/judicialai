@@ -36,6 +36,9 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
+    "externalBin": [
+      "../../backend/target/release/bs-detector"
+    ],
     "resources": {
       "demo-matters/**/*": "demo-matters/"
     }
