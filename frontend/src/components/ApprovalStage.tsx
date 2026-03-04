@@ -116,9 +116,8 @@ export function ApprovalStage({ citations, retrievedCases, onRunAnalysis, analyz
                     </button>
                   )}
                   {expandedText === c.id && retrieved?.full_text && (
-                    <pre className="mt-2 max-h-48 overflow-y-auto text-xs text-slate-600 bg-slate-50 rounded p-2 whitespace-pre-wrap">
-                      {retrieved.full_text.slice(0, 3000)}
-                      {retrieved.full_text.length > 3000 && '\n[truncated...]'}
+                    <pre className="mt-2 flex-1 overflow-y-auto text-xs text-slate-600 bg-slate-50 rounded p-2 whitespace-pre-wrap" style={{ maxHeight: '60vh' }}>
+                      {retrieved.full_text}
                     </pre>
                   )}
 

@@ -435,7 +435,7 @@ fn build_checklist(
 
     for v in validation_results {
         items.push(ChecklistItem {
-            id: Uuid::new_v4().to_string(),
+            id: v.citation_id.clone(),  // use citation_id so frontend can match retrievedCases
             item_type: ChecklistItemType::Citation,
             label: v.citation_string.clone(),
             verdict: Some(v.verdict.clone()),

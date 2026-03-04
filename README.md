@@ -104,13 +104,22 @@ This is not the most efficient architecture for automated processing at scale. I
 
 ### Prerequisites
 
-Install these in order before cloning:
+Install these in order before cloning. All are free.
 
-1. **Git** — https://git-scm.com/download/win (choose default options)
-2. **Rust** — https://rustup.rs (run the installer, restart your terminal after)
-3. **Node.js v18+** — https://nodejs.org (choose the LTS version)
+**1. Git** — https://git-scm.com/download/win
+Download and run the installer. Default options are fine. Restart your terminal after.
 
-An **Anthropic API key** is needed for AI validation only. Citation extraction and case retrieval from CourtListener work without one. Get a key at https://console.anthropic.com if you want to run the full analysis pipeline.
+**2. Visual Studio Build Tools** (required by Rust on Windows)
+https://visualstudio.microsoft.com/visual-cpp-build-tools/
+Download and run `vs_BuildTools.exe`. In the installer, select **"Desktop development with C++"** and click Install. This takes 5-10 minutes. You do not need the full Visual Studio IDE.
+
+**3. Rust** — https://rustup.rs
+Download and run `rustup-init.exe`. Accept the default installation. Restart your terminal after. This installs `cargo` (the Rust build tool) which the backend and desktop shell both require.
+
+**4. Node.js v18 or later** — https://nodejs.org
+Download the **LTS** version (not "Current"). Run the installer with default options. Restart your terminal after.
+
+An **Anthropic API key** is needed only for AI validation. Citation extraction and case retrieval from CourtListener work without one. Get a key at https://console.anthropic.com if you want to run the full analysis pipeline — pay-as-you-go, a full analysis run costs approximately $0.50–$2.00.
 
 ### Clone and launch
 
@@ -120,9 +129,11 @@ cd judicialai
 .\launch.bat
 ```
 
-`launch.bat` kills any existing instances on ports 8002/5175, starts the backend, and launches the Tauri desktop app. First launch compiles the Tauri shell (~3-5 min). Subsequent launches are fast.
+`launch.bat` checks all prerequisites and prints clear errors if anything is missing. It then kills any old instances on ports 8002/5175, starts the backend, and launches the Tauri desktop app.
 
-The `.env` file is committed with the CourtListener API token (free account, non-commercial use). Replace it with your own token for high-volume use: register at [courtlistener.com](https://www.courtlistener.com/sign-in/) and generate a token at `/api/rest/v4/api-token-auth/`.
+**First launch timing:** The Rust backend and Tauri shell both compile from source on first run (~5-10 min total). Every subsequent launch takes ~10 seconds.
+
+The `.env` file is committed with a shared CourtListener API token (free account, non-commercial use). Replace it with your own if you intend high-volume use: register at [courtlistener.com](https://www.courtlistener.com/sign-in/) and generate a token at `/api/rest/v4/api-token-auth/`.
 
 ---
 

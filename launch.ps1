@@ -43,6 +43,25 @@ if ($cargoFound) {
     $errors += "RUST NOT FOUND`n  Install from: https://rustup.rs`n  Run the installer, then restart this terminal and try again."
 }
 
+# Visual Studio Build Tools (needed by Rust on Windows to link binaries)
+# Check for cl.exe (MSVC compiler) or at least the VS install directory
+$vsWhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+$hasMSVC = $false
+if (Test-Path $vsWhere) {
+    $vsInstalls = & $vsWhere -products * -requires Microsoft.VisualCpp.Tools.HostX64.TargetX64 -format json 2>&1
+    if ($vsInstalls -and $vsInstalls -ne "[]") { $hasMSVC = $true }
+}
+if (-not $hasMSVC) {
+    # Also check if cl.exe is on PATH
+    if (Get-Command cl -ErrorAction SilentlyContinue) { $hasMSVC = $true }
+}
+if ($hasMSVC) {
+    Write-Host "  Visual Studio Build Tools: found" -ForegroundColor Green
+} elseif ($cargoFound) {
+    # Rust is installed but MSVC may be missing — warn, Rust will error at build time
+    $warnings += "VISUAL STUDIO BUILD TOOLS may be missing.`n  Rust on Windows needs the C++ build tools to compile binaries.`n  If the build fails, install from:`n  https://visualstudio.microsoft.com/visual-cpp-build-tools/`n  Select 'Desktop development with C++' and click Install."
+}
+
 # Node.js
 $nodeCmd = Get-Command node -ErrorAction SilentlyContinue
 if ($nodeCmd) {
