@@ -193,10 +193,9 @@ function MemoPanel({ memo, matterId }: { memo: string; matterId: string }) {
 
 function CaseTextPanel({
   retrieved,
-  onBack,
 }: {
   retrieved: RetrievedCase;
-  onBack: () => void;
+  onBack?: () => void;
 }) {
   const hasFullText = retrieved.full_text && retrieved.full_text.length > 200;
   const textSource = hasFullText
@@ -207,15 +206,11 @@ function CaseTextPanel({
 
   return (
     <div className="flex flex-col h-full border-r border-slate-200 bg-white">
-      <div className="px-4 py-2.5 border-b border-slate-200 shrink-0 flex items-center justify-between gap-2">
+      <div className="px-4 py-2.5 border-b border-slate-200 shrink-0">
         <div className="min-w-0">
-          <div className="flex items-center gap-2">
-            <button onClick={onBack} className="text-xs text-slate-400 hover:text-slate-700">← MSJ</button>
-            <span className="text-slate-300">|</span>
-            <p className="text-xs font-semibold text-slate-800 truncate">
-              {retrieved.title ?? 'Retrieved case'}
-            </p>
-          </div>
+          <p className="text-xs font-semibold text-slate-800 truncate">
+            {retrieved.title ?? 'Retrieved case'}
+          </p>
           <div className="flex items-center gap-2 mt-0.5 text-[10px] text-slate-500 flex-wrap">
             {retrieved.court_name && <span>{retrieved.court_name}</span>}
             {retrieved.decision_date && <span>· {retrieved.decision_date}</span>}
@@ -233,8 +228,7 @@ function CaseTextPanel({
             )}
           </div>
         </div>
-      </div>
-      <div className="flex-1 overflow-y-auto p-4">
+      </div>      <div className="flex-1 overflow-y-auto p-4">
         {hasFullText ? (
           <pre className="text-xs text-slate-700 leading-relaxed whitespace-pre-wrap font-mono">
             {retrieved.full_text}
@@ -790,20 +784,33 @@ export default function App() {
                       </div>
                     )}
 
-                    {/* Citation Review: checklist + inline case text panel */}
+                    {/* Citation Review: three-panel — MSJ | case text | checklist */}
                     {activeResultTab === 'checklist' && (
                       <div className="flex-1 overflow-hidden flex">
-                        {/* Left: MSJ or retrieved case text */}
-                        <div className="w-[40%] shrink-0 border-r border-slate-200 overflow-hidden">
+                        {/* Panel 1: MSJ with citation highlights */}
+                        <div className="w-[30%] shrink-0 border-r border-slate-200 overflow-hidden">
+                          <DocumentViewer
+                            matter={activeMatter}
+                            filename={activeMatter.primaryDocument}
+                            citationStrings={citationHighlights}
+                            canExtract={false}
+                            extracting={false}
+                            onExtract={() => {}}
+                          />
+                        </div>
+
+                        {/* Panel 2: Retrieved case text (changes when you click a citation) */}
+                        <div className="w-[30%] shrink-0 border-r border-slate-200 overflow-hidden">
                           {leftPanel === 'msj' ? (
-                            <DocumentViewer
-                              matter={activeMatter}
-                              filename={activeDocFilename}
-                              citationStrings={citationHighlights}
-                              canExtract={false}
-                              extracting={false}
-                              onExtract={() => {}}
-                            />
+                            <div className="flex flex-col h-full">
+                              <div className="px-4 py-3 border-b border-slate-200 bg-slate-50 shrink-0">
+                                <p className="text-xs font-semibold text-slate-600">Retrieved Case Text</p>
+                                <p className="text-[10px] text-slate-400 mt-0.5">Click "View case text" on any citation to load the retrieved opinion here</p>
+                              </div>
+                              <div className="flex-1 flex items-center justify-center text-slate-300 text-xs p-4 text-center">
+                                Select a citation from the checklist to compare its case text with the MSJ
+                              </div>
+                            </div>
                           ) : leftPanel.startsWith('case:') ? (
                             (() => {
                               const citId = leftPanel.slice(5);
@@ -816,10 +823,11 @@ export default function App() {
                             })()
                           ) : null}
                         </div>
-                        {/* Right: Checklist */}
-                        <div className="flex-1 overflow-y-auto p-4">
-                          <p className="text-xs text-slate-500 mb-3">
-                            Click any citation to expand the AI analysis. Use <strong>View case text</strong> to read the retrieved opinion alongside the brief. Accept, flag, or rerun each item, then export the audit trail.
+
+                        {/* Panel 3: Citation checklist */}
+                        <div className="flex-1 overflow-y-auto p-3">
+                          <p className="text-xs text-slate-500 mb-2">
+                            Click <strong>View case text</strong> to load the retrieved opinion into the centre panel alongside the MSJ.
                           </p>
                           <ResolutionChecklist
                             report={report}

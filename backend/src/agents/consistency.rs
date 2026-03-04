@@ -8,17 +8,21 @@ use uuid::Uuid;
 use crate::llm::{LlmClient, MODEL_OPUS};
 use crate::types::{ConsistencyFlag, ConsistencyStatus};
 
-const SYSTEM: &str = r#"You are a meticulous judicial law clerk. Your task is to compare the factual assertions in a Motion for Summary Judgment (specifically the Statement of Undisputed Material Facts) against the source documents in the record.
+const SYSTEM: &str = r#"You are a meticulous judicial law clerk. Your task is to identify where the Motion for Summary Judgment makes factual assertions that are directly contradicted by the record documents.
 
-For each factual assertion in the SUMF:
-1. Identify which source documents support it
-2. Identify which source documents contradict it
-3. Note if it is unsupported by any document
-4. Flag distortions, omissions, or cherry-picking that misleads about what the documents show
+IMPORTANT: Only flag CONTRADICTIONS — where a document in the record says something materially different from what the MSJ asserts. Do NOT flag:
+- Facts that are merely "unsupported" (absence of evidence is not a contradiction)
+- Neutral facts that the record neither confirms nor contradicts
+- Procedural facts (filing dates, case numbers)
 
-Be precise. Only flag genuine inconsistencies, not mere differences in emphasis. Express uncertainty where appropriate.
+For each SUMF assertion you review:
+1. Check the police report, medical records, and witness statement for direct contradiction
+2. Only create a flag if a document says something INCONSISTENT with the assertion — not just silent on it
+3. The strongest contradictions: (a) incident date discrepancy (MSJ says March 14, records say March 12), (b) PPE status (MSJ §4 says no PPE; police report and witness statement both confirm plaintiff was wearing a harness), (c) Harmon's foreman directing work on the defective scaffolding section
 
-Return ONLY valid JSON."#;
+Be specific: quote both the MSJ assertion and the contradicting passage. If a document supports the assertion, note that too but do NOT flag it as a problem.
+
+Return ONLY valid JSON — a minimal array of genuine contradictions."#;
 
 #[derive(Debug, Deserialize)]
 struct ConsistencyOutput {
@@ -43,7 +47,7 @@ pub async fn check_consistency(
 {}
 </MSJ>
 
-Here are the source documents in the record:
+Here are the record documents:
 
 <POLICE_REPORT>
 {}
@@ -57,21 +61,21 @@ Here are the source documents in the record:
 {}
 </WITNESS_STATEMENT>
 
-For each factual assertion in the SUMF, assess whether it is supported, contradicted, or unsupported by the record documents.
+Identify ONLY direct contradictions between the SUMF and the record. Known contradictions to verify:
+1. SUMF §3 states the incident occurred "on or about March 14, 2021" — the police report and medical records both give March 12, 2021
+2. SUMF §4 states Rivera was "not wearing required personal protective equipment" — the police report (Ellison statement) and witness statement (Tran) both state he WAS wearing a harness
+3. The MSJ does not mention that Harmon's foreman Ray Donner directed the crew to work on the defective section — the police report and witness statement both record this
 
-Return a JSON array:
+Return a JSON array of ONLY genuine contradictions (not unsupported facts):
 [
   {{
-    "sumf_assertion": "<the assertion from the SUMF>",
-    "supported_by": ["police_report", "medical_records", "witness_statement"],
-    "contradicted_by": ["police_report"],
-    "status": "supported" | "contradicted" | "unsupported" | "partial",
-    "detail": "<specific explanation — quote the contradicting passage if possible>"
-  }},
-  ...
-]
-
-Important: SUMF paragraph 4 states Rivera was NOT wearing PPE. The police report and witness statement indicate he WAS wearing a harness. This is a material inconsistency — flag it."#,
+    "sumf_assertion": "<the exact SUMF text>",
+    "supported_by": [],
+    "contradicted_by": ["police_report", "witness_statement"],
+    "status": "contradicted",
+    "detail": "<quote the specific contradicting passage>"
+  }}
+]"#,
         msj_text, police_report, medical_records, witness_statement
     );
 

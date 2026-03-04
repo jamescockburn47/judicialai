@@ -19,7 +19,16 @@ use crate::types::{ExtractedCitation, RetrievalStatus, RetrievedCase};
 const USER_AGENT: &str =
     "JudicialReview/0.1 (citation verification tool; contact: legalquant@protonmail.me)";
 const COURTLISTENER_SEARCH: &str = "https://www.courtlistener.com/api/rest/v4/search/";
+const COURTLISTENER_OPINIONS: &str = "https://www.courtlistener.com/api/rest/v4/opinions/";
 const CL_STORAGE_BASE: &str = "https://storage.courtlistener.com/";
+
+/// Read optional CourtListener API token from environment.
+/// Free registration at https://www.courtlistener.com/sign-in/
+/// Token from https://www.courtlistener.com/api/rest/v4/api-token-auth/
+fn cl_api_token() -> Option<String> {
+    std::env::var("COURTLISTENER_API_TOKEN").ok()
+        .filter(|t| !t.is_empty() && t != "your_courtlistener_token_here")
+}
 
 fn build_client() -> Result<reqwest::Client> {
     Ok(reqwest::Client::builder()
@@ -67,6 +76,7 @@ struct ClResult {
 #[allow(dead_code)]
 #[derive(Debug, Deserialize)]
 struct ClOpinion {
+    id: Option<u64>,
     snippet: Option<String>,
     download_url: Option<String>,
     local_path: Option<String>,
@@ -76,27 +86,65 @@ struct ClOpinion {
 
 // ── PDF text extraction ───────────────────────────────────────────────────────
 
-/// Fetch and extract text from a CourtListener S3-hosted PDF.
-/// The `local_path` field in the opinion object points to the S3 key.
-async fn fetch_pdf_text(client: &reqwest::Client, local_path: &str) -> Option<String> {
-    if local_path.is_empty() { return None; }
+/// Fetch full opinion text using the most reliable method available:
+/// 1. Authenticated opinions/ endpoint → plain_text (requires free CL account)
+/// 2. S3 PDF download → pdf-extract
+/// 3. Returns None if neither is available (snippet will be used separately)
+async fn fetch_full_text(
+    client: &reqwest::Client,
+    opinion_id: Option<u64>,
+    local_path: Option<&str>,
+) -> Option<String> {
+    // Strategy 1: Authenticated opinions endpoint for plain_text
+    if let (Some(id), Some(token)) = (opinion_id, cl_api_token()) {
+        let url = format!("{}{}/?format=json", COURTLISTENER_OPINIONS, id);
+        let resp = client
+            .get(&url)
+            .header("Authorization", format!("Token {}", token))
+            .send()
+            .await
+            .ok()?;
 
-    let url = format!("{}{}", CL_STORAGE_BASE, local_path);
-    let resp = client.get(&url).send().await.ok()?;
-    if !resp.status().is_success() { return None; }
-
-    let bytes = resp.bytes().await.ok()?;
-    if bytes.is_empty() { return None; }
-
-    // Extract text from PDF bytes
-    match pdf_extract::extract_text_from_mem(&bytes) {
-        Ok(text) if text.trim().len() > 100 => {
-            // Trim to 8000 chars — enough for LLM validation without context overflow
-            let trimmed = text.trim();
-            Some(trimmed[..trimmed.len().min(8000)].to_string())
+        if resp.status().is_success() {
+            if let Ok(json) = resp.json::<serde_json::Value>().await {
+                let text = json["plain_text"].as_str().filter(|s| s.trim().len() > 200)
+                    .map(|s| s.trim()[..s.trim().len().min(12000)].to_string());
+                if text.is_some() {
+                    return text;
+                }
+                // Fall back to html_with_citations if plain_text empty
+                let html_text = json["html_with_citations"].as_str()
+                    .filter(|s| s.trim().len() > 200)
+                    .and_then(|h| html2text::from_read(h.as_bytes(), 100).ok())
+                    .filter(|s| s.trim().len() > 200)
+                    .map(|s| s.trim()[..s.trim().len().min(12000)].to_string());
+                if html_text.is_some() {
+                    return html_text;
+                }
+            }
         }
-        _ => None,
     }
+
+    // Strategy 2: S3 PDF
+    if let Some(path) = local_path {
+        if !path.is_empty() {
+            let url = format!("{}{}", CL_STORAGE_BASE, path);
+            if let Ok(resp) = client.get(&url).send().await {
+                if resp.status().is_success() {
+                    if let Ok(bytes) = resp.bytes().await {
+                        if let Ok(text) = pdf_extract::extract_text_from_mem(&bytes) {
+                            let trimmed = text.trim();
+                            if trimmed.len() > 200 {
+                                return Some(trimmed[..trimmed.len().min(12000)].to_string());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    None
 }
 
 /// Collect all available text from the search result: snippet + syllabus + posture.
@@ -200,24 +248,17 @@ async fn search_by_case_name(
 
     let result = &search.results[0];
 
-    // Try to get full text from S3 PDF
+    // Try to get full text: authenticated opinions endpoint first, then S3 PDF
     let full_text = {
-        let mut text = None;
-        if let Some(ops) = &result.opinions {
-            for op in ops {
-                if let Some(ref lp) = op.local_path {
-                    if !lp.is_empty() {
-                        text = fetch_pdf_text(client, lp).await;
-                        if text.is_some() { break; }
-                    }
-                }
-            }
-        }
-        // Fall back to assembled snippet/syllabus/posture
-        text.or_else(|| {
-            let assembled = assemble_text_from_result(result);
-            if assembled.len() > 50 { Some(assembled) } else { None }
-        })
+        let opinion = result.opinions.as_ref().and_then(|ops| ops.first());
+        let opinion_id = opinion.and_then(|o| o.id);
+        let local_path = opinion.and_then(|o| o.local_path.as_deref());
+        fetch_full_text(client, opinion_id, local_path).await
+            .or_else(|| {
+                // Last resort: assembled snippet/syllabus if substantial
+                let assembled = assemble_text_from_result(result);
+                if assembled.len() > 500 { Some(assembled) } else { None }
+            })
     };
 
     let has_full_text = full_text.as_ref().map(|t| t.len() > 200).unwrap_or(false);
@@ -274,24 +315,17 @@ async fn search_by_citation_text(
         search.results.first()
     }?;
 
-    // Try PDF full text
-    let full_text = {
-        let mut text = None;
-        if let Some(ops) = &best.opinions {
-            for op in ops {
-                if let Some(ref lp) = op.local_path {
-                    if !lp.is_empty() {
-                        text = fetch_pdf_text(client, lp).await;
-                        if text.is_some() { break; }
-                    }
-                }
-            }
-        }
-        text.or_else(|| {
-            let assembled = assemble_text_from_result(best);
-            if assembled.len() > 50 { Some(assembled) } else { None }
-        })
-    };
+        // Try full text: opinions endpoint first, then S3 PDF
+        let full_text = {
+            let opinion = best.opinions.as_ref().and_then(|ops| ops.first());
+            let opinion_id = opinion.and_then(|o| o.id);
+            let local_path = opinion.and_then(|o| o.local_path.as_deref());
+            fetch_full_text(client, opinion_id, local_path).await
+                .or_else(|| {
+                    let assembled = assemble_text_from_result(best);
+                    if assembled.len() > 500 { Some(assembled) } else { None }
+                })
+        };
 
     let has_full_text = full_text.as_ref().map(|t| t.len() > 200).unwrap_or(false);
     let confidence = compute_confidence(citation, best, has_full_text);
