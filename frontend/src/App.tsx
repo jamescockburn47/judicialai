@@ -121,6 +121,74 @@ function DocumentViewer({
   );
 }
 
+// ── Bench Memo Panel ──────────────────────────────────────────────────────────
+
+function MemoPanel({ memo, matterId }: { memo: string; matterId: string }) {
+  const [expanded, setExpanded] = useState(true);
+
+  const exportMemo = () => {
+    const blob = new Blob([memo], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `bench-memo-${matterId}.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const lines = memo.split('\n');
+
+  return (
+    <div className="bg-indigo-950 text-indigo-100 px-5 shrink-0 border-b border-indigo-900">
+      {/* Header row */}
+      <div className="flex items-center justify-between py-2">
+        <button
+          onClick={() => setExpanded(!expanded)}
+          className="flex items-center gap-2 text-indigo-400 hover:text-white text-[10px] font-semibold uppercase tracking-wide"
+        >
+          <span>{expanded ? '▼' : '▶'}</span>
+          Bench Memo
+        </button>
+        <div className="flex items-center gap-2">
+          {!expanded && (
+            <p className="text-indigo-300 text-[10px] italic truncate max-w-xs">
+              {lines.find(l => l.trim())?.slice(0, 80)}…
+            </p>
+          )}
+          <button
+            onClick={exportMemo}
+            className="text-[10px] text-indigo-400 hover:text-white border border-indigo-800 hover:border-indigo-500 rounded px-2 py-0.5 transition-colors"
+          >
+            Export
+          </button>
+        </div>
+      </div>
+
+      {/* Structured content */}
+      {expanded && (
+        <div className="pb-3 text-xs space-y-0.5 max-h-64 overflow-y-auto">
+          {lines.map((line, i) => {
+            const trimmed = line.trim();
+            if (!trimmed) return <div key={i} className="h-1.5" />;
+            // Section heading: ALL CAPS word(s) followed by colon
+            const isHeading = /^[A-Z][A-Z\s]{2,}:/.test(trimmed);
+            if (isHeading) {
+              return (
+                <p key={i} className="text-indigo-300 font-semibold text-[10px] uppercase tracking-wide pt-2">
+                  {trimmed}
+                </p>
+              );
+            }
+            return (
+              <p key={i} className="text-indigo-100 leading-relaxed">{trimmed}</p>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Main App ──────────────────────────────────────────────────────────────────
 
 export default function App() {
@@ -356,14 +424,9 @@ export default function App() {
               )}
             </div>
 
-            {/* Bench memo banner */}
+            {/* Bench memo banner — structured sections, collapsible, exportable */}
             {report?.judicial_memo && (
-              <div className="bg-indigo-950 text-indigo-100 px-5 py-2 text-xs leading-relaxed shrink-0">
-                <span className="text-indigo-400 font-semibold uppercase tracking-wide mr-2 text-[10px]">
-                  Bench Memo
-                </span>
-                {report.judicial_memo}
-              </div>
+              <MemoPanel memo={report.judicial_memo} matterId={activeMatter?.id ?? 'report'} />
             )}
 
             {/* Main split */}

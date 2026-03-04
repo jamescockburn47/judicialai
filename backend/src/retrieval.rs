@@ -98,10 +98,15 @@ async fn search_by_case_name(
         0.80
     };
 
-    let full_text = extract_text_from_result(result);
+    let snippet_text = extract_text_from_result(result);
     let case_url = result.absolute_url.as_ref().map(|p| {
         if p.starts_with("http") { p.clone() } else { format!("https://www.courtlistener.com{}", p) }
     }).unwrap_or_default();
+
+    // Fetch full opinion text — much more useful for AI validation than a 277-char snippet
+    let full_text = fetch_full_opinion_text(client, &case_url).await
+        .filter(|t| t.len() > 200)
+        .unwrap_or(snippet_text);
 
     Some(RetrievedCase {
         citation_id: citation.id.clone(),
@@ -162,11 +167,15 @@ async fn search_by_citation_text(
             search.results.first()
         }?;
 
-        let full_text = extract_text_from_result(best);
+        let snippet_text = extract_text_from_result(best);
         let case_url = best.absolute_url.as_ref().map(|p| {
             if p.starts_with("http") { p.clone() }
             else { format!("https://www.courtlistener.com{}", p) }
         }).unwrap_or_default();
+
+        let full_text = fetch_full_opinion_text(client, &case_url).await
+            .filter(|t| t.len() > 200)
+            .unwrap_or(snippet_text);
 
         let confidence = if citation.year.as_deref().unwrap_or("") ==
             best.date_filed.as_deref().unwrap_or("")[..4.min(best.date_filed.as_deref().unwrap_or("").len())].to_string() {
@@ -200,26 +209,49 @@ fn extract_text_from_result(result: &ClResult) -> String {
         _ => return String::new(),
     };
 
-    // Prefer the lead opinion or combined opinion snippet
-    let preferred_order = ["lead-opinion", "combined-opinion", ""];
-    for pref in &preferred_order {
-        if let Some(op) = opinions.iter().find(|o| {
-            pref.is_empty() || o.opinion_type.as_deref() == Some(pref)
-        }) {
-            if let Some(snippet) = &op.snippet {
-                if !snippet.is_empty() {
-                    return snippet.clone();
-                }
-            }
-        }
-    }
-
-    // Fallback: concatenate all snippets
-    opinions.iter()
+    // Concatenate all available snippets
+    let snippets: String = opinions.iter()
         .filter_map(|o| o.snippet.as_deref())
         .filter(|s| !s.is_empty())
         .collect::<Vec<_>>()
-        .join("\n\n")
+        .join("\n\n");
+
+    snippets
+}
+
+/// Fetch full opinion text from a CourtListener opinion HTML page.
+/// CourtListener renders opinion text in <div id="opinion-content"> or similar.
+/// Falls back to html2text on the full page body.
+async fn fetch_full_opinion_text(client: &reqwest::Client, url: &str) -> Option<String> {
+    if url.is_empty() { return None; }
+
+    // Only attempt for courtlistener.com URLs
+    if !url.contains("courtlistener.com") { return None; }
+
+    let resp = client.get(url).send().await.ok()?;
+    if !resp.status().is_success() { return None; }
+
+    let html = resp.text().await.ok()?;
+    if html.len() < 1000 { return None; }
+
+    // Extract text from the opinion body — CourtListener wraps opinion text in
+    // specific divs. Use html2text to strip markup and get readable plain text.
+    let text = html2text::from_read(html.as_bytes(), 100).unwrap_or_default();
+
+    // Trim boilerplate: CourtListener pages have a lot of nav/header above the opinion.
+    // Find the first occurrence of the case name or a legal indicator.
+    let legal_markers = ["Cal.", "F.2d", "F.3d", "F.4th", "U.S.", "HELD", "OPINION", "JUSTICE", "JUDGE", "Court of Appeal", "Supreme Court"];
+    let start = legal_markers.iter()
+        .filter_map(|m| text.find(m))
+        .min()
+        .unwrap_or(0);
+
+    let extracted = text[start..].trim().to_string();
+    if extracted.len() > 200 {
+        Some(extracted[..extracted.len().min(8000)].to_string())
+    } else {
+        None
+    }
 }
 
 // ── Name query builder ────────────────────────────────────────────────────────
