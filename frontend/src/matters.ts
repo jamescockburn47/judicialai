@@ -1,6 +1,7 @@
 /**
  * Matter file system — reads/writes matters from ~/Documents/JudicialReview/
- * The demo matter is seeded by launch.ps1 on every launch (no Tauri fs needed for seed).
+ * Demo matter is seeded on first launch by seedDemoMatterIfNeeded(),
+ * which works both from the installer and from source via launch.ps1.
  */
 import type { Matter, MatterAnalysisCache, AnalysisReport, AnalysisMode } from './types';
 
@@ -57,6 +58,58 @@ async function writeJsonFile(path: string, data: unknown) {
   await writeTextFile(path, JSON.stringify(data, null, 2));
 }
 
+// ── Demo matter seeding ───────────────────────────────────────────────────────
+// Runs on first launch (both from source via launch.ps1 AND from the installer).
+// Copies the bundled demo matter from the app's resource directory to ~/Documents/JudicialReview/
+
+async function seedDemoMatterIfNeeded(baseDir: string): Promise<void> {
+  if (!isTauri()) return;
+  try {
+    const { exists, mkdir, copyFile, readDir } = await import('@tauri-apps/plugin-fs');
+    const { resolveResource } = await import('@tauri-apps/api/path');
+
+    const destMatterJson = `${baseDir}/rivera-v-harmon/matter.json`;
+    if (await exists(destMatterJson)) return; // already seeded
+
+    // Find bundled demo matter — try resolveResource first (production installer),
+    // fall back to the known dev path
+    let srcBase: string | null = null;
+    try {
+      const candidate = await resolveResource('demo-matters/rivera-v-harmon');
+      if (await exists(`${candidate}/matter.json`)) {
+        srcBase = candidate;
+      }
+    } catch { /* resolveResource not available or path not found */ }
+
+    if (!srcBase) {
+      // Dev fallback — absolute path used by launch.ps1
+      const devPath = 'C:/Users/James/Desktop/Judicial AI/frontend/src-tauri/demo-matters/rivera-v-harmon';
+      if (await exists(`${devPath}/matter.json`)) {
+        srcBase = devPath;
+      }
+    }
+
+    if (!srcBase) return; // no source found, skip silently
+
+    const destDir = `${baseDir}/rivera-v-harmon`;
+    const destDocsDir = `${destDir}/documents`;
+    await mkdir(destDocsDir, { recursive: true });
+    await copyFile(`${srcBase}/matter.json`, `${destDir}/matter.json`);
+
+    const docEntries = await readDir(`${srcBase}/documents`).catch(() => []);
+    for (const entry of docEntries) {
+      if (entry.name) {
+        await copyFile(
+          `${srcBase}/documents/${entry.name}`,
+          `${destDocsDir}/${entry.name}`,
+        );
+      }
+    }
+  } catch (e) {
+    console.warn('Demo matter seeding failed (non-fatal):', e);
+  }
+}
+
 // ── Public API ────────────────────────────────────────────────────────────────
 
 export async function listMatters(): Promise<Matter[]> {
@@ -64,6 +117,9 @@ export async function listMatters(): Promise<Matter[]> {
 
   const baseDir = await getBaseDir();
   await ensureDir(baseDir);
+
+  // Seed demo matter on first launch, regardless of how the app was started
+  await seedDemoMatterIfNeeded(baseDir);
 
   const { readDir } = await import('@tauri-apps/plugin-fs');
 
