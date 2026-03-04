@@ -99,6 +99,7 @@ async fn main() {
                 court_name: None,
                 decision_date: None,
                 full_text: gt.case_text_hint.clone(),
+                cite_count: None,
                 resolution_method: "eval_provided".to_string(),
                 status: RetrievalStatus::Resolved,
             }),

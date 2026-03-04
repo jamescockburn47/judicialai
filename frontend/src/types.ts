@@ -44,6 +44,8 @@ export interface RetrievedCase {
   court_name: string | null;
   decision_date: string | null;
   full_text: string | null;
+  /** Number of times cited in CourtListener. 0 = fabrication signal. null = not retrieved. */
+  cite_count: number | null;
   resolution_method: string;
   status: 'resolved' | 'unresolvable' | { error: string };
 }

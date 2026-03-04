@@ -22,12 +22,15 @@ pub struct ExtractedCitation {
 pub struct RetrievedCase {
     pub citation_id: String,
     pub url: String,
-    pub source: String,          // "courtlistener" | "cap" | "google_scholar"
+    pub source: String,
     pub confidence: f64,
     pub title: Option<String>,
     pub court_name: Option<String>,
     pub decision_date: Option<String>,
     pub full_text: Option<String>,
+    /// Number of times this case appears in CourtListener's citation graph.
+    /// 0 is a strong fabrication signal. None means the count was not retrieved.
+    pub cite_count: Option<u32>,
     pub resolution_method: String,
     pub status: RetrievalStatus,
 }

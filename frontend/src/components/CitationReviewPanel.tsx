@@ -78,6 +78,14 @@ function CaseTextView({
               {retrieved.decision_date}
             </span>
           )}
+          {retrieved.cite_count !== null && retrieved.cite_count !== undefined && (
+            <span className={`font-medium ${
+              retrieved.cite_count === 0 ? 'text-red-600' : 'text-slate-600'
+            }`}>
+              <span className="text-slate-400">Citations in graph: </span>
+              {retrieved.cite_count === 0 ? '0 ⚠ fabrication signal' : retrieved.cite_count}
+            </span>
+          )}
           {retrieved.url && (
             <a
               href={retrieved.url}
@@ -240,9 +248,26 @@ export function CitationReviewPanel({
                       }`}
                     >
                       {unresolvable
-                        ? 'Not found'
+                        ? 'Not found in databases'
                         : `${Math.round((retrieved?.confidence ?? 0) * 100)}% match`}
                     </span>
+                    {/* Cite count — key fabrication signal */}
+                    {retrieved?.cite_count !== null && retrieved?.cite_count !== undefined && (
+                      <span
+                        className={`text-[10px] font-medium rounded px-1.5 py-0.5 ${
+                          retrieved.cite_count === 0
+                            ? 'bg-red-100 text-red-700'
+                            : retrieved.cite_count < 10
+                            ? 'bg-amber-100 text-amber-700'
+                            : 'bg-slate-100 text-slate-600'
+                        }`}
+                        title="Number of times this case is cited in CourtListener's citation graph. 0 = strong fabrication signal."
+                      >
+                        {retrieved.cite_count === 0
+                          ? '⚠ 0 citations (fabrication signal)'
+                          : `${retrieved.cite_count} citations`}
+                      </span>
+                    )}
                     {retrieved?.title && !unresolvable && (
                       <span className="text-[10px] text-slate-500 truncate max-w-[180px]">
                         {retrieved.title}

@@ -9,24 +9,28 @@ use crate::types::{
     ApprovedCitation, CitationProposition, ConfidenceLevel, ValidationResult, Verdict,
 };
 
-const SYSTEM: &str = r#"You are a rigorous legal citation verifier assisting a federal judge. Your task is to determine whether a cited case actually supports the proposition for which it is cited in a motion.
+const SYSTEM: &str = r#"You are a rigorous legal citation verifier assisting a federal judge. Your task is to determine whether a cited case (1) exists, (2) actually says what the brief claims, and (3) whether any direct quote is accurate.
 
 You will be given:
 1. The proposition as stated in the motion
 2. Any direct quote attributed to the case
-3. The full text of the cited case (or a summary if full text is unavailable)
+3. Retrieved case information: full text (if available), title, cite count
+4. The cite_count: number of times this case appears in CourtListener's citation graph
 
-Your analysis must distinguish between:
-- VERIFIED: The case clearly supports the stated proposition
-- SUSPECT: The case arguably supports the proposition but it is overstated, taken out of context, or relies on dicta
-- MISUSED: The case is real but the proposition attributed to it is materially incorrect — the case holds something different
-- FABRICATED: The case text is unavailable and/or the combination of case name, citation, and proposition is implausible — likely a hallucinated citation
-- UNVERIFIABLE: Insufficient information to assess — case text not retrieved, clearly state what could not be verified
+CRITICAL SIGNALS:
+- cite_count = 0 with no case text: very strong indicator of fabrication. A case used in a brief almost always appears somewhere in citation databases. No case text + zero citations = likely fabricated.
+- cite_count > 50: well-established case, existence verified
+- Case text retrieved: assess whether the proposition and any quote match the actual text
+- No case text retrieved but cite_count > 0: real but full text unavailable — assess plausibility of proposition based on court, year, and legal context
 
-For quote accuracy:
-- If a direct quote is present, verify it against the case text character by character. Flag any omissions, substitutions, or embellishments, including the word "never" or similar absolutes that overstate a holding.
+Your verdicts:
+- VERIFIED: Case exists, supports the stated proposition, any quote is accurate
+- SUSPECT: Case exists but proposition overstated, taken out of context, or quote modified (e.g. "never" added to conditional holding)
+- MISUSED: Case is real but holds something materially different from the claimed proposition — doctrinal transplant
+- FABRICATED: Case does not appear to exist in any verified legal database (cite_count=0, no text, implausible details)
+- UNVERIFIABLE: Case text not retrieved and cite_count not available — cannot assess, but note what could not be verified
 
-Be appropriately uncertain. "Could not verify" is a valid and honest finding. Never fabricate a finding.
+For quote accuracy: if quoted text is provided, search for it verbatim in the case text. Flag any word omissions, substitutions, or additions — including absolute words like "never" or "always" that overstate a conditional holding.
 
 Return ONLY valid JSON."#;
 
@@ -51,13 +55,19 @@ pub async fn validate_citation(
         .retrieved_case
         .as_ref()
         .and_then(|r| r.full_text.as_deref())
-        .unwrap_or("[Case text not retrieved — assess based on citation plausibility only]");
+        .unwrap_or("[Case text not retrieved]");
 
-    let retrieval_source = approved
-        .retrieved_case
-        .as_ref()
-        .map(|r| format!("Source: {} | URL: {}", r.source, r.url))
-        .unwrap_or_else(|| "No retrieval data available".to_string());
+    let retrieval_info = approved.retrieved_case.as_ref().map(|r| {
+        format!(
+            "Source: {} | Title: {} | Court: {} | Date: {} | Cite count in CourtListener graph: {} | URL: {}",
+            r.source,
+            r.title.as_deref().unwrap_or("(unknown)"),
+            r.court_name.as_deref().unwrap_or("(unknown)"),
+            r.decision_date.as_deref().unwrap_or("(unknown)"),
+            r.cite_count.map(|c| c.to_string()).as_deref().unwrap_or("(not retrieved)"),
+            r.url
+        )
+    }).unwrap_or_else(|| "No retrieval data available".to_string());
 
     let judge_note_section = match judge_note {
         Some(note) if !note.is_empty() => format!(
@@ -75,9 +85,9 @@ Proposition claimed in motion: {}
 
 Direct quote in motion: {}
 
-{}
+Argument section: {}
 
-Full case text:
+Case text (from CourtListener PDF or snippet):
 <CASE_TEXT>
 {}
 </CASE_TEXT>{}
@@ -86,23 +96,20 @@ Assess this citation and return JSON in this exact format:
 {{
   "verdict": "verified" | "suspect" | "misused" | "fabricated" | "unverifiable",
   "confidence": "high" | "medium" | "low",
-  "reasoning": "<detailed analysis, 2-5 sentences>",
+  "reasoning": "<detailed analysis, 3-6 sentences. Explicitly mention cite_count if 0>",
   "quote_accurate": true | false | null,
   "quote_analysis": "<analysis of quote accuracy, or null if no quote>",
   "is_structural": true | false,
-  "flags": ["<specific issue 1>", "<specific issue 2>", ...]
+  "flags": ["<specific issue 1>", ...]
 }}"#,
         approved.citation.citation_string,
-        retrieval_source,
+        retrieval_info,
         proposition.proposition,
         proposition
             .quoted_text
             .as_deref()
             .unwrap_or("[No direct quote]"),
-        format!(
-            "Argument section: {}",
-            proposition.argument_section
-        ),
+        proposition.argument_section,
         case_text,
         judge_note_section
     );
